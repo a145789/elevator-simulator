@@ -16,6 +16,9 @@
     "vite-plugin-solid": "^2.3.0"
   },
   "dependencies": {
+    "@hope-ui/solid": "^0.6.7",
+    "@stitches/core": "^1.2.8",
+    "@unocss/reset": "^0.45.8",
     "solid-js": "^1.4.7"
   }
 }

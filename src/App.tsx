@@ -14,10 +14,12 @@
  *
  */
 
-import { Component, For } from "solid-js"
+import { Component, createMemo, createSignal, Index } from "solid-js"
 import { createStore } from "solid-js/store"
 
 const MAX_FLOOR_NUM = 24 as const
+
+const MAX_ELEVATOR_NUM = 4 as const
 
 const ELEVATOR_WAITING_TIME = 5 as const
 
@@ -32,23 +34,92 @@ const enum ElevatorStatus {
 const enum Direction {
   up,
   down,
-  stop
+  stop,
 }
 
-const genElevator = () => ({
-  currentFloor:1,
-  direction: Direction.stop
-})
+const LightColor = ["#F76965", "#ff9626", "#27c346"] as const
 
-const genFloor = () =>
+const genBuilding = () =>
   Array.from({ length: MAX_FLOOR_NUM }).map((_, index) => ({
     level: MAX_FLOOR_NUM - index,
-    elevatorStatus: ElevatorStatus.pending,
-    elevatorInFloorNum: 1
+    elevators: Array.from({ length: MAX_ELEVATOR_NUM }).map(() => ({
+      direction: Direction.stop,
+      elevatorStatus: ElevatorStatus.pending,
+      elevatorMonitor: 1,
+    })),
   }))
 
 const App: Component = () => {
-  return <div>Hello</div>
+  const [building, setBuilding] = createStore(genBuilding())
+  const [currentLevel, setCurrentLevel] = createSignal(1)
+
+  const visibleFloor = createMemo(() => {
+    return building.slice(MAX_FLOOR_NUM - currentLevel(), 4)
+  })
+  return (
+    <div class="w-full h-full flex justify-center items-center">
+      <div class="flex items-center">
+        <div class="border-t-1px">
+          <Index each={visibleFloor()}>
+            {(item) => {
+              const floor = item()
+              return (
+                <div class="flex border-b-1px h-300px items-center">
+                  <div class="">{floor.level}</div>
+
+                  <Index each={floor.elevators}>
+                    {(elevator) => {
+                      const e = elevator()
+                      return (
+                        <div class="w-220px p-20px box-border flex flex-col items-center">
+                          <div class="border h-40px w-full flex justify-around items-center">
+                            <Index each={LightColor}>
+                              {(color) => (
+                                <div
+                                  class="w-30px h-30px rounded-full"
+                                  classList={{ "opacity-30": true }}
+                                  style={{ background: color() }}
+                                />
+                              )}
+                            </Index>
+                          </div>
+
+                          <div class="w-24px h-24px m-4px border text-center">
+                            {e.elevatorMonitor}
+                          </div>
+
+                          <div class="border w-full h-190px relative">
+                            <Index each={Array.from({ length: 2 })}>
+                              {(_, index) => {
+                                const style =
+                                  index === 0
+                                    ? { left: "89px" }
+                                    : { right: "89px" }
+                                return (
+                                  <div
+                                    class="w-1px h-full bg-#000 absolute top-0"
+                                    style={style}
+                                  />
+                                )
+                              }}
+                            </Index>
+                          </div>
+                        </div>
+                      )
+                    }}
+                  </Index>
+                </div>
+              )
+            }}
+          </Index>
+        </div>
+
+        <div class="ml-42px">
+          <h2>Operation Panel</h2>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default App

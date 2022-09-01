@@ -1,34 +1,16 @@
-## Usage
+# 电梯模拟器
 
-Those templates dependencies are maintained via [pnpm](https://pnpm.io) via `pnpm up -Lri`.
-
-This is the reason you see a `pnpm-lock.yaml`. That being said, any package manager will work. This file can be safely be removed once you clone a template.
-
-```bash
-$ npm install # or pnpm install or yarn install
-```
-
-### Learn more on the [Solid Website](https://solidjs.com) and come chat with us on our [Discord](https://discord.com/invite/solidjs)
-
-## Available Scripts
-
-In the project directory, you can run:
-
-### `npm dev` or `npm start`
-
-Runs the app in the development mode.<br>
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
-
-The page will reload if you make edits.<br>
-
-### `npm run build`
-
-Builds the app for production to the `dist` folder.<br>
-It correctly bundles Solid in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.<br>
-Your app is ready to be deployed!
-
-## Deployment
-
-You can deploy the `dist` folder to any static host provider (netlify, surge, now, etc.)
+## 基础设置
+- 每个楼层都有楼层数、显示当前电梯在第几层的显示屏、红黄绿三个状态灯
+  - 红 -> 电梯不在此楼，上下通行中 running
+  - 黄 -> 电梯在此楼，但是没有开门，等待调度 pending
+  - 绿 -> 电梯在此楼开门等待人员进入 waiting
+- 每个电梯有上下按钮召唤电梯，电梯响应后到达指定楼层，开门时间为 1.5s
+- 开门后会等待 5s，people 可选择进入不进入，5s 后会再花 1.5s 的时间关门
+- 关门期间 press 上下按钮会阻断关门
+- 电梯启动会有 1.5s 的等待上下楼层的指令时间
+- 刚进入时，初始化电梯状态-> 随机在任意楼层，当前可为运行状态或者等待
+ 
+## 调度配置
+- 刚进入随机 4 部电梯在不同的楼层
+- 开启一个调度，随机 500-5000s 之间，开始随机楼层召唤电梯，最近的电梯行驶到指定楼层

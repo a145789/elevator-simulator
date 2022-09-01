@@ -1,21 +1,9 @@
-/**
- *
- * 守得云开见月明
- * 每个楼层都有楼层数、显示当前电梯在第几层的显示屏、红黄绿三个状态灯
- * 红 -> 电梯不在此楼，上下通行中 running
- * 黄 -> 电梯在此楼，但是没有开门，等待调度 pending
- * 绿 -> 电梯在此楼开门等待人员进入 waiting
- * 每个电梯有上下按钮召唤电梯，电梯响应后到达指定楼层，开门时间为 1.5s
- * 开门后会等待 5s，people 可选择进入不进入，5s 后会再花 1.5s 的时间关门
- * 关门期间 press 上下按钮会阻断关门
- * 电梯启动会有 1.5s 的等待上下楼层的指令时间
- *
- * 刚进入时，初始化电梯状态-> 随机在任意楼层，当前可为运行状态或者等待
- *
- */
-
-import { Component, createMemo, createSignal, Index } from "solid-js"
-import { createStore } from "solid-js/store"
+import {
+  Component,
+  createSignal,
+  Index,
+  onMount,
+} from "solid-js"
 
 const MAX_FLOOR_NUM = 24 as const
 
@@ -26,9 +14,9 @@ const ELEVATOR_WAITING_TIME = 5 as const
 const DOOR_ACTION_TIME = 1.5 as const
 
 const enum ElevatorStatus {
-  running,
-  pending,
-  waiting,
+  running = "#F76965",
+  pending = "#ff9626",
+  waiting = "#27c346",
 }
 
 const enum Direction {
@@ -37,55 +25,121 @@ const enum Direction {
   stop,
 }
 
-const LightColor = ["#F76965", "#ff9626", "#27c346"] as const
+const LightColor = [
+  ElevatorStatus.running,
+  ElevatorStatus.pending,
+  ElevatorStatus.waiting,
+] as const
 
+const genElevator = (): {
+  id: number
+  currentFloor: number
+  elevatorStatus: ElevatorStatus.pending | ElevatorStatus.waiting
+  direction: Direction
+}[] =>
+  Array.from({ length: MAX_ELEVATOR_NUM }).map((_, index) => ({
+    id: index,
+    currentFloor: 1,
+    elevatorStatus: ElevatorStatus.pending,
+    direction: Direction.stop,
+  }))
 const genBuilding = () =>
   Array.from({ length: MAX_FLOOR_NUM }).map((_, index) => ({
     level: MAX_FLOOR_NUM - index,
-    elevators: Array.from({ length: MAX_ELEVATOR_NUM }).map(() => ({
+    elevators: Array.from({ length: MAX_ELEVATOR_NUM }).map((_, eIdx) => ({
+      id: eIdx,
       direction: Direction.stop,
-      elevatorStatus: ElevatorStatus.pending,
-      elevatorMonitor: 1,
     })),
   }))
 
 const App: Component = () => {
-  const [building, setBuilding] = createStore(genBuilding())
-  const [currentLevel, setCurrentLevel] = createSignal(1)
-
-  const visibleFloor = createMemo(() => {
-    return building.slice(MAX_FLOOR_NUM - currentLevel(), 4)
+  const [elevators, setElevators] = createSignal(genElevator())
+  const [building, setBuilding] = createSignal(genBuilding())
+  const [personCurrentFloor, setPersonCurrentFloor] = createSignal(1)
+  let buildingElm: HTMLDivElement | undefined
+  onMount(() => {
+    buildingElm!.scrollTop = buildingElm!.scrollHeight
   })
+
+  // const visibleFloor = createMemo(() => {
+  //   const gap = MAX_FLOOR_NUM - personCurrentFloor() - 2
+  //   const index =
+  //     gap < 0 ? 0 : gap + 4 > MAX_FLOOR_NUM ? MAX_FLOOR_NUM - 4 : gap
+
+  //   return building.slice(index, index + 4)
+  // })
+
+  function scheduling(){
+
+  }
+  setElevators((e) =>
+    e.map((item) => ({
+      ...item,
+      currentFloor: Math.floor(Math.random() * 24) + 1,
+    }))
+  )
   return (
-    <div class="w-full h-full flex justify-center items-center">
-      <div class="flex items-center">
-        <div class="border-t-1px">
-          <Index each={visibleFloor()}>
-            {(item) => {
+    <div class="w-full h-full flex justify-center items-center py-20px box-border">
+      <div class="flex items-center h-full">
+        <div class="border-y-1px h-full overflow-y-hidden" ref={buildingElm}>
+          <Index each={building()}>
+            {(item, index) => {
               const floor = item()
               return (
-                <div class="flex border-b-1px h-300px items-center">
-                  <div class="">{floor.level}</div>
+                <div
+                  class="flex h-300px items-center"
+                  classList={{
+                    "border-b-1px": index + 1 !== building().length,
+                  }}
+                >
+                  <div class="w-24px">{floor.level}</div>
 
                   <Index each={floor.elevators}>
-                    {(elevator) => {
-                      const e = elevator()
+                    {(buildingElevator) => {
+                      const { id } = buildingElevator()
+                      const { currentFloor, elevatorStatus } = elevators().find(
+                        (e) => e.id === id
+                      )!
                       return (
                         <div class="w-220px p-20px box-border flex flex-col items-center">
                           <div class="border h-40px w-full flex justify-around items-center">
                             <Index each={LightColor}>
-                              {(color) => (
-                                <div
-                                  class="w-30px h-30px rounded-full"
-                                  classList={{ "opacity-30": true }}
-                                  style={{ background: color() }}
-                                />
-                              )}
+                              {(color) => {
+                                const c = color()
+                                let notShow = true
+
+                                switch (c) {
+                                  case ElevatorStatus.running:
+                                    notShow = currentFloor === floor.level
+                                    break
+                                  case ElevatorStatus.pending:
+                                    notShow =
+                                      currentFloor !== floor.level ||
+                                      elevatorStatus === ElevatorStatus.waiting
+                                    break
+                                  case ElevatorStatus.waiting:
+                                    notShow =
+                                      currentFloor !== floor.level ||
+                                      elevatorStatus === ElevatorStatus.pending
+                                    break
+
+                                  default:
+                                    break
+                                }
+
+                                return (
+                                  <div
+                                    class="w-30px h-30px rounded-full"
+                                    classList={{ "opacity-10": notShow }}
+                                    style={{ background: c }}
+                                  />
+                                )
+                              }}
                             </Index>
                           </div>
 
                           <div class="w-24px h-24px m-4px border text-center">
-                            {e.elevatorMonitor}
+                            {currentFloor}
                           </div>
 
                           <div class="border w-full h-190px relative">
@@ -116,6 +170,17 @@ const App: Component = () => {
 
         <div class="ml-42px">
           <h2>Operation Panel</h2>
+          <ul>
+            <li>current floor: {personCurrentFloor()}</li>
+            <li>
+              <button onClick={() => setPersonCurrentFloor((c) => c + 1)}>
+                up
+              </button>
+              <button onClick={() => setPersonCurrentFloor((c) => c - 1)}>
+                down
+              </button>
+            </li>
+          </ul>
         </div>
       </div>
     </div>

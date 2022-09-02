@@ -1,9 +1,4 @@
-import {
-  Component,
-  createSignal,
-  Index,
-  onMount,
-} from "solid-js"
+import { Component, createSignal, Index, onMount } from "solid-js"
 
 const MAX_FLOOR_NUM = 24 as const
 
@@ -30,6 +25,10 @@ const LightColor = [
   ElevatorStatus.pending,
   ElevatorStatus.waiting,
 ] as const
+
+const random = (max: number, min = 0) => {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
 
 const genElevator = (): {
   id: number
@@ -69,13 +68,22 @@ const App: Component = () => {
   //   return building.slice(index, index + 4)
   // })
 
-  function scheduling(){
-
+  const queue = []
+  function scheduling() {}
+  function callNearestElevator() {}
+  let randomCallingTimer: number
+  function randomCalling() {
+    clearTimeout(randomCallingTimer)
+    randomCallingTimer = setTimeout(() => {
+      for (let i = 0, len = random(5); i < len; i++) {
+        queue.push(random(24, 1))
+      }
+    }, random(5000, 500))
   }
   setElevators((e) =>
     e.map((item) => ({
       ...item,
-      currentFloor: Math.floor(Math.random() * 24) + 1,
+      currentFloor: random(24, 1),
     }))
   )
   return (

@@ -11,9 +11,12 @@ const ELEVATOR_WAITING_TIME = 4 as const
 const DOOR_ACTION_TIME = 1.5 as const
 
 const enum ElevatorStatus {
-  running = "#F76965",
-  pending = "#ff9626",
-  waiting = "#27c346",
+  /** 电梯正在运行中 */
+  running,
+  /** 电梯停止等待召唤 */
+  pending,
+  /** 开门等待进入 */
+  waiting,
 }
 
 const enum Direction {
@@ -22,16 +25,29 @@ const enum Direction {
   stop,
 }
 
-const LightColor = [
-  ElevatorStatus.running,
-  ElevatorStatus.pending,
-  ElevatorStatus.waiting,
+const enum ArrivedStatus {
+  no,
+  ok,
+}
+
+const enum LightColor {
+  red = "#F76965",
+  yellow = "#ff9626",
+  green = "#27c346",
+}
+const LIGHT_COLOR = [
+  LightColor.red,
+  LightColor.yellow,
+  LightColor.green,
 ] as const
 
 const random = (max: number, min = 0) => {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
-type Queue = {
+const deepClone = <T extends object | any[]>(obj: T): T => {
+  return JSON.parse(JSON.stringify(obj))
+}
+type Caller = {
   flag: number
   currentFloor: number
   targetFloor: null | number
@@ -40,13 +56,14 @@ type Queue = {
 type Elevator = {
   id: number
   currentFloor: number
-  elevatorStatus: ElevatorStatus.pending | ElevatorStatus.waiting
+  elevatorStatus: ElevatorStatus
   direction: Direction
-  queue: Queue[]
+  target: Caller | null
+  queue: Caller[]
 }
 
 let flag = 0
-const queue: Queue[] = []
+const queue: Caller[] = []
 
 const genElevator = (): Elevator[] =>
   Array.from({ length: MAX_ELEVATOR_NUM }).map((_, index) => ({
@@ -54,6 +71,7 @@ const genElevator = (): Elevator[] =>
     currentFloor: random(24, 1),
     elevatorStatus: ElevatorStatus.pending,
     direction: Direction.stop,
+    target: null,
     queue: [],
   }))
 const genBuilding = () =>
@@ -70,9 +88,8 @@ const App: Component = () => {
   const [building, setBuilding] = createSignal(genBuilding())
   const [personCurrentFloor, setPersonCurrentFloor] = createSignal(1)
 
-  const hasVacantElevators = createMemo(() =>
-    elevators().some(({ direction }) => direction === Direction.stop)
-  )
+  const getVacantElevators = () =>
+    elevators().filter(({ direction }) => direction === Direction.stop)
 
   let buildingElm: HTMLDivElement | undefined
   onMount(() => {
@@ -88,87 +105,139 @@ const App: Component = () => {
   //   return building.slice(index, index + 4)
   // })
 
+  function quickSetElevators(elevator: Elevator) {
+    return (e: Elevator[]) => {
+      const index = e.findIndex((item) => item.id === elevator.id)
+      e.splice(index, 1, deepClone(elevator))
+      return [...e]
+    }
+  }
+
   class Scheduling {
     elevator: Elevator
-    constructor(elevator: Elevator) {
-      this.elevator = { ...elevator }
+    /** 当前电梯是否到达乘客所在楼层 */
+    arrived: ArrivedStatus
+    constructor(elevator: Elevator, arrived: ArrivedStatus) {
+      this.elevator = deepClone(elevator)
+      this.arrived = arrived
     }
 
-    run() {
-      const nextFloor = this.elevator.currentFloor + 1
-      const elevatorQueue = this.elevator.queue.filter(
-        (c) => c.currentFloor === nextFloor || c.targetFloor === nextFloor
-      )
-      const tempLength = elevatorQueue.length
+    openDoor() {}
 
-      for (let i = 0; i < queue.length; i++) {
-        if (
-          this.elevator.direction === queue[i].direction &&
-          nextFloor === queue[i].currentFloor
-        ) {
-          elevatorQueue.push(queue.splice(i, 1)[0])
-          i--
-        }
-      }
-      if (elevatorQueue.length) {
-        this.elevator.queue.sort((a, b) =>
-          this.elevator.direction === Direction.up
-            ? (a.targetFloor || a.currentFloor) -
-              (b.targetFloor || b.currentFloor)
-            : (b.targetFloor || b.currentFloor) -
-              (a.targetFloor || a.currentFloor)
-        )
-        for (let i = 0; i < elevatorQueue.length; i++) {
-          const c = elevatorQueue[i]
-          if (c.targetFloor === null) {
-            elevatorQueue[i].targetFloor = random(
-              c.direction === Direction.up ? MAX_FLOOR_NUM : 1,
-              c.currentFloor
-            )
-          } else {
-            elevatorQueue.splice(0, 1)
+    run() {
+      if (this.arrived === ArrivedStatus.ok) {
+        const elevatorQueue = deepClone(this.elevator.queue)
+        // 如果当前已经接好乘客去往指定楼层，路上可以带上沿途同样方向的其他楼层的乘客
+        for (let i = 0; i < queue.length; i++) {
+          if (
+            this.elevator.direction === queue[i].direction &&
+            this.elevator.currentFloor === queue[i].currentFloor
+          ) {
+            elevatorQueue.push(queue.splice(i, 1)[0])
             i--
           }
         }
-        this.elevator.queue.splice(0, tempLength, ...elevatorQueue)
-        this.elevator.elevatorStatus = ElevatorStatus.waiting
-      } else {
-        this.elevator.elevatorStatus = ElevatorStatus.pending
+
+        for (let i = 0; i < elevatorQueue.length; i++) {
+          if (elevatorQueue[i].targetFloor === null) {
+            // 接上乘客并且指定地方
+            elevatorQueue[i].targetFloor = random(
+              elevatorQueue[i].direction === Direction.up ? MAX_FLOOR_NUM : 1,
+              elevatorQueue[i].currentFloor
+            )
+          }
+          if (elevatorQueue[i].targetFloor === this.elevator.currentFloor) {
+            // 到达指定楼层的乘客下电梯
+            elevatorQueue.splice(i, 1)
+            this.elevator.elevatorStatus = ElevatorStatus.waiting
+            i--
+          }
+        }
+
+        if (this.elevator.elevatorStatus !== ElevatorStatus.waiting) {
+          this.elevator.elevatorStatus === ElevatorStatus.running
+        }
+        this.elevator.queue = elevatorQueue
       }
 
-      this.elevator.currentFloor = nextFloor
+      // 如果没有任何乘客，电梯恢复为等待状态
+      if (!this.elevator.queue.length) {
+        this.elevator.direction = Direction.stop
+        this.elevator.elevatorStatus = ElevatorStatus.pending
+        this.elevator.target = null
+        setElevators(quickSetElevators(this.elevator))
+        return
+      }
 
-      const theElevators = elevators()
-      const index = theElevators.findIndex(
-        (item) => item.id === this.elevator.id
-      )
-      theElevators.splice(index, 1, { ...this.elevator })
+      switch (this.arrived) {
+        case ArrivedStatus.no:
+          this.elevator.currentFloor =
+            this.elevator.currentFloor < this.elevator.target!.currentFloor
+              ? this.elevator.currentFloor + 1
+              : this.elevator.currentFloor - 1
+          if (
+            this.elevator.currentFloor === this.elevator.target!.currentFloor
+          ) {
+            this.arrived = ArrivedStatus.ok
+          }
+          break
+        case ArrivedStatus.ok:
+          this.elevator.currentFloor =
+            this.elevator.direction === Direction.up
+              ? this.elevator.currentFloor + 1
+              : this.elevator.currentFloor - 1
+          break
+
+        default:
+          break
+      }
+
+      this.elevator.elevatorStatus = ElevatorStatus.running
       setTimeout(() => {
-        setElevators([...theElevators])
+        setElevators(quickSetElevators(this.elevator))
 
-        if (this.elevator.queue.length) {
-          // this.run()
-        }
+        this.run()
       }, ELEVATOR_THROUGH_FLOOR_TIME)
     }
   }
 
   function callNearestVacantElevator() {
-    const [caller] = queue.splice(0, 1)
+    const SchedulingList: Scheduling[] = []
+    for (let i = 0; i < queue.length; i++) {
+      const vacantElevators = getVacantElevators()
+      if (!vacantElevators.length) {
+        break
+      }
+      const caller = queue[i]
+      const elevator = vacantElevators.reduce((p, c) =>
+        c.elevatorStatus !== ElevatorStatus.pending ||
+        (p.elevatorStatus === ElevatorStatus.pending &&
+          Math.abs(p.currentFloor - caller.currentFloor) <
+            Math.abs(c.currentFloor - caller.currentFloor))
+          ? p
+          : c
+      )
 
-    const theElevators = elevators()
-    const elevator = theElevators.reduce((p, c) =>
-      c.direction !== Direction.stop ||
-      (p.direction === Direction.stop &&
-        Math.abs(p.currentFloor - caller.currentFloor) <
-          Math.abs(c.currentFloor - caller.currentFloor))
-        ? p
-        : c
-    )
-    elevator.direction = caller.direction
-    elevator.queue.push(caller)
-    const scheduling = new Scheduling(elevator)
-    scheduling.run()
+      elevator.target = caller
+      elevator.direction = caller.direction
+      elevator.queue.push(caller)
+      queue.splice(i, 1)
+      i--
+      setElevators(quickSetElevators(elevator))
+
+      SchedulingList.push(
+        new Scheduling(
+          elevator,
+          elevator.currentFloor === caller.currentFloor
+            ? ArrivedStatus.ok
+            : ArrivedStatus.no
+        )
+      )
+    }
+
+    for (const scheduling of SchedulingList) {
+      scheduling.run()
+    }
   }
   let randomCallingTimer: number
   function randomCalling() {
@@ -180,9 +249,8 @@ const App: Component = () => {
         queue.push({ flag: flag++, currentFloor, direction, targetFloor: null })
       }
 
-      if (hasVacantElevators()) {
-        callNearestVacantElevator()
-      }
+      callNearestVacantElevator()
+      randomCalling()
     }, random(3000, 500))
   }
 
@@ -211,41 +279,45 @@ const App: Component = () => {
                       return (
                         <div class="w-220px p-20px box-border flex flex-col items-center">
                           <div class="border h-40px w-full flex justify-around items-center">
-                            <Index each={LightColor}>
+                            <Index each={LIGHT_COLOR}>
                               {(color) => {
                                 const c = color()
-                                const notShow = createMemo(() => {
-                                  let notShow = true
+                                const show = createMemo(() => {
+                                  let show = true
                                   const { currentFloor, elevatorStatus } =
                                     elevator()
 
                                   switch (c) {
-                                    case ElevatorStatus.running:
-                                      notShow = currentFloor === floor.level
+                                    case LightColor.red:
+                                      // 电梯不在此楼层的展示红灯
+                                      show = currentFloor !== floor.level
                                       break
-                                    case ElevatorStatus.pending:
-                                      notShow =
-                                        currentFloor !== floor.level ||
+                                    case LightColor.yellow:
+                                      // 电梯在此楼层并且为等待状态展示黄灯
+                                      show =
+                                        currentFloor === floor.level &&
+                                        (elevatorStatus ===
+                                          ElevatorStatus.running ||
+                                          elevatorStatus ===
+                                            ElevatorStatus.pending)
+                                      break
+                                    case LightColor.green:
+                                      show =
+                                        currentFloor === floor.level &&
                                         elevatorStatus ===
                                           ElevatorStatus.waiting
-                                      break
-                                    case ElevatorStatus.waiting:
-                                      notShow =
-                                        currentFloor !== floor.level ||
-                                        elevatorStatus ===
-                                          ElevatorStatus.pending
                                       break
 
                                     default:
                                       break
                                   }
-                                  return notShow
+                                  return show
                                 })
 
                                 return (
                                   <div
                                     class="w-30px h-30px rounded-full"
-                                    classList={{ "opacity-10": notShow() }}
+                                    classList={{ "opacity-10": !show() }}
                                     style={{ background: c }}
                                   />
                                 )

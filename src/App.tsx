@@ -6,9 +6,9 @@ const MAX_ELEVATOR_NUM = 4 as const
 
 const ELEVATOR_THROUGH_FLOOR_TIME = 1500
 
-const ELEVATOR_WAITING_TIME = 4 as const
+const ELEVATOR_WAITING_TIME = 4000 as const
 
-const DOOR_ACTION_TIME = 1.5 as const
+const DOOR_ACTION_TIME = 2500 as const
 
 const enum ElevatorStatus {
   /** 电梯正在运行中 */
@@ -52,6 +52,7 @@ type Caller = {
   currentFloor: number
   targetFloor: null | number
   direction: Direction.up | Direction.down
+  isMainView: boolean
 }
 type Elevator = {
   id: number
@@ -79,7 +80,7 @@ const genBuilding = () =>
     level: MAX_FLOOR_NUM - index,
     elevators: Array.from({ length: MAX_ELEVATOR_NUM }).map((_, eIdx) => ({
       id: eIdx,
-      direction: Direction.stop,
+      translateX: [0, 0] as [number, number],
     })),
   }))
 
@@ -113,6 +114,40 @@ const App: Component = () => {
     }
   }
 
+  function updatePureBuildingTranslateX(
+    elevator: Elevator,
+    translateX: [number, number]
+  ) {
+    const { id, currentFloor } = elevator
+    const index = MAX_FLOOR_NUM - currentFloor
+    const theBuilding = deepClone(building())
+    theBuilding[index].elevators[
+      theBuilding[index].elevators.findIndex((item) => item.id === id)
+    ].translateX = translateX
+
+    return theBuilding
+  }
+
+  let isRunScrollAnimation = true
+  function moveScroll(direction: Direction) {
+    isRunScrollAnimation = true
+    if(!buildingElm){
+      return
+    }
+    if((direction === Direction.up && buildingElm.scrollTop === 0)||(direction === Direction.down && buildingElm.scrollTop === buildingElm.scrollHeight)){
+      return
+    }
+    function cb() {
+      if(!isRunScrollAnimation){
+        return
+      }
+      buildingElm!.scrollTop = buildingElm!.scrollTop - 10
+      requestAnimationFrame(cb)
+    }
+    requestAnimationFrame(cb)
+
+  }
+
   class Scheduling {
     elevator: Elevator
     /** 当前电梯是否到达乘客所在楼层 */
@@ -122,44 +157,22 @@ const App: Component = () => {
       this.arrived = arrived
     }
 
-    openDoor() {}
+    private openDoor() {
+      setBuilding(updatePureBuildingTranslateX(this.elevator, [-91, 91]))
 
-    run() {
-      if (this.arrived === ArrivedStatus.ok) {
-        const elevatorQueue = deepClone(this.elevator.queue)
-        // 如果当前已经接好乘客去往指定楼层，路上可以带上沿途同样方向的其他楼层的乘客
-        for (let i = 0; i < queue.length; i++) {
-          if (
-            this.elevator.direction === queue[i].direction &&
-            this.elevator.currentFloor === queue[i].currentFloor
-          ) {
-            elevatorQueue.push(queue.splice(i, 1)[0])
-            i--
-          }
-        }
+      setTimeout(() => {
+        this.closeDoor()
+      }, ELEVATOR_WAITING_TIME + DOOR_ACTION_TIME)
+    }
 
-        for (let i = 0; i < elevatorQueue.length; i++) {
-          if (elevatorQueue[i].targetFloor === null) {
-            // 接上乘客并且指定地方
-            elevatorQueue[i].targetFloor = random(
-              elevatorQueue[i].direction === Direction.up ? MAX_FLOOR_NUM : 1,
-              elevatorQueue[i].currentFloor
-            )
-          }
-          if (elevatorQueue[i].targetFloor === this.elevator.currentFloor) {
-            // 到达指定楼层的乘客下电梯
-            elevatorQueue.splice(i, 1)
-            this.elevator.elevatorStatus = ElevatorStatus.waiting
-            i--
-          }
-        }
+    private closeDoor() {
+      setBuilding(updatePureBuildingTranslateX(this.elevator, [0, 0]))
+      setTimeout(() => {
+        this.toNextFloor()
+      }, DOOR_ACTION_TIME)
+    }
 
-        if (this.elevator.elevatorStatus !== ElevatorStatus.waiting) {
-          this.elevator.elevatorStatus === ElevatorStatus.running
-        }
-        this.elevator.queue = elevatorQueue
-      }
-
+    private toNextFloor() {
       // 如果没有任何乘客，电梯恢复为等待状态
       if (!this.elevator.queue.length) {
         this.elevator.direction = Direction.stop
@@ -193,11 +206,59 @@ const App: Component = () => {
       }
 
       this.elevator.elevatorStatus = ElevatorStatus.running
+      if (this.elevator.queue.find((item) => item.isMainView)?.targetFloor) {
+        moveScroll(this.elevator.direction)
+      }
       setTimeout(() => {
         setElevators(quickSetElevators(this.elevator))
 
         this.run()
+        isRunScrollAnimation = false
       }, ELEVATOR_THROUGH_FLOOR_TIME)
+    }
+
+    public run() {
+      if (this.arrived === ArrivedStatus.ok) {
+        const elevatorQueue = deepClone(this.elevator.queue)
+        // 如果当前已经接好乘客去往指定楼层，路上可以带上沿途同样方向的其他楼层的乘客
+        for (let i = 0; i < queue.length; i++) {
+          if (
+            this.elevator.direction === queue[i].direction &&
+            this.elevator.currentFloor === queue[i].currentFloor
+          ) {
+            elevatorQueue.push(queue.splice(i, 1)[0])
+            i--
+          }
+        }
+
+        for (let i = 0; i < elevatorQueue.length; i++) {
+          if (elevatorQueue[i].targetFloor === null) {
+            // 接上乘客并且指定地方
+            elevatorQueue[i].targetFloor = random(
+              elevatorQueue[i].direction === Direction.up ? MAX_FLOOR_NUM : 1,
+              elevatorQueue[i].currentFloor
+            )
+            this.elevator.elevatorStatus = ElevatorStatus.waiting
+          }
+          if (elevatorQueue[i].targetFloor === this.elevator.currentFloor) {
+            // 到达指定楼层的乘客下电梯
+            elevatorQueue.splice(i, 1)
+            this.elevator.elevatorStatus = ElevatorStatus.waiting
+            i--
+          }
+        }
+
+        this.elevator.queue = elevatorQueue
+        if (this.elevator.elevatorStatus !== ElevatorStatus.waiting) {
+          this.elevator.elevatorStatus === ElevatorStatus.running
+        } else {
+          setElevators(quickSetElevators(this.elevator))
+          this.openDoor()
+          return
+        }
+      }
+
+      this.toNextFloor()
     }
   }
 
@@ -209,6 +270,7 @@ const App: Component = () => {
         break
       }
       const caller = queue[i]
+      // 找到最近的空置电梯
       const elevator = vacantElevators.reduce((p, c) =>
         c.elevatorStatus !== ElevatorStatus.pending ||
         (p.elevatorStatus === ElevatorStatus.pending &&
@@ -246,12 +308,29 @@ const App: Component = () => {
       for (let i = 0, len = random(5, 1); i < len; i++) {
         const currentFloor = random(24, 1)
         const direction = random(9) < 5 ? Direction.down : Direction.up
-        queue.push({ flag: flag++, currentFloor, direction, targetFloor: null })
+        queue.push({
+          flag: flag++,
+          currentFloor,
+          direction,
+          targetFloor: null,
+          isMainView: false,
+        })
       }
 
       callNearestVacantElevator()
       randomCalling()
     }, random(3000, 500))
+  }
+
+  function personCalling(direction: Direction.up | Direction.down) {
+    queue.push({
+      flag: flag++,
+      currentFloor: personCurrentFloor(),
+      direction,
+      targetFloor: null,
+      isMainView: true,
+    })
+    callNearestVacantElevator()
   }
 
   return (
@@ -270,7 +349,7 @@ const App: Component = () => {
                 >
                   <div class="w-24px">{floor.level}</div>
 
-                  <Index each={floor.elevators}>
+                  <Index each={item().elevators}>
                     {(buildingElevator) => {
                       const { id } = buildingElevator()
                       const elevator = createMemo(
@@ -325,21 +404,27 @@ const App: Component = () => {
                             </Index>
                           </div>
 
-                          <div class="w-24px h-24px m-4px border text-center">
-                            {elevator().currentFloor}
+                          <div class="w-full my-4px flex justify-around">
+                            <div class="w-24px h-24px border text-center">
+                              {elevator().currentFloor}
+                            </div>
+                            <div class="w-24px h-24px border text-center">
+                              {elevator().direction === Direction.up
+                                ? "up"
+                                : "down"}
+                            </div>
                           </div>
 
-                          <div class="border w-full h-190px relative">
-                            <Index each={Array.from({ length: 2 })}>
-                              {(_, index) => {
-                                const style =
-                                  index === 0
-                                    ? { left: "89px" }
-                                    : { right: "89px" }
+                          <div class="border w-full h-190px flex justify-center">
+                            <Index each={buildingElevator().translateX}>
+                              {(translateX) => {
                                 return (
                                   <div
-                                    class="w-1px h-full bg-#000 absolute top-0"
-                                    style={style}
+                                    class="w-1px h-full bg-#000 transition-transform ease"
+                                    style={{
+                                      "transition-duration": `${DOOR_ACTION_TIME}ms`,
+                                      transform: `translateX(${translateX()}px)`,
+                                    }}
                                   />
                                 )
                               }}
@@ -360,10 +445,8 @@ const App: Component = () => {
           <ul>
             <li>current floor: {personCurrentFloor()}</li>
             <li>
-              <button onClick={() => setPersonCurrentFloor((c) => c + 1)}>
-                up
-              </button>
-              <button onClick={() => setPersonCurrentFloor((c) => c - 1)}>
+              <button onClick={() => personCalling(Direction.up)}>up</button>
+              <button onClick={() => personCalling(Direction.down)}>
                 down
               </button>
             </li>

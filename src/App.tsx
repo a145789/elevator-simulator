@@ -205,6 +205,18 @@ const App: Component = () => {
           }
           break
         case ArrivedStatus.ok:
+          const isPoleFloor =
+            this.elevator.direction === Direction.up
+              ? Math.max.apply(null, this.elevator.floorList) <
+                this.elevator.currentFloor
+              : Math.min.apply(null, this.elevator.floorList) >
+                this.elevator.currentFloor
+          if (isPoleFloor) {
+            this.elevator.direction =
+              this.elevator.direction === Direction.up
+                ? Direction.down
+                : Direction.up
+          }
           this.elevator.currentFloor =
             this.elevator.direction === Direction.up
               ? this.elevator.currentFloor + 1
@@ -335,10 +347,7 @@ const App: Component = () => {
           isMainView: false,
           action(elevator, caller) {
             if (!caller.targetFloor) {
-              caller.targetFloor = random(
-                elevator.direction === Direction.up ? MAX_FLOOR_NUM : 1,
-                elevator.currentFloor
-              )
+              caller.targetFloor = random(MAX_FLOOR_NUM, 1)
               queue.splice(
                 queue.findIndex((item) => item.flag === caller.flag),
                 1
@@ -405,7 +414,7 @@ const App: Component = () => {
                             ? {
                                 transition: "width",
                                 width: 0,
-                                "transition-delay": `${DOOR_ACTION_TIME / 2}ms`,
+                                "transition-delay": `${DOOR_ACTION_TIME / 4}ms`,
                                 "transition-duration": `${
                                   DOOR_ACTION_TIME / 2
                                 }ms`,
@@ -477,7 +486,7 @@ const App: Component = () => {
 
                           <div class="border w-full h-190px flex justify-center relative">
                             <div
-                              class="box-border py-4px text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden"
+                              class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
                               style={handleButtonStyle()}
                             >
                               进入

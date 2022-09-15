@@ -1,4 +1,5 @@
 import {
+  batch,
   Component,
   createMemo,
   createSignal,
@@ -61,7 +62,15 @@ type Caller = {
   targetFloor: null | number
   direction: Direction.up | Direction.down
   isMainView: boolean
-  action: (e: Elevator, c: Caller) => void
+  /** 电梯开门的时候调用此方法 */
+  openAction: (
+    elevatorCurrentFloor: number,
+    callerAction: (action: "getOn" | "getOff", caller: Caller) => void
+  ) => void
+  /** 电梯运行前的回调 */
+  beforeRunning?: (floor: number) => void
+  /** 电梯运行后的回调 */
+  afterRunning?: (floor: number) => void
 }
 type Elevator = {
   id: number
@@ -159,16 +168,46 @@ const App: Component = () => {
     requestAnimationFrame(cb)
   }
 
+  // 每次召唤电梯生成一个实例
   class Scheduling {
-    elevator: Elevator
+    private elevator: Elevator
     /** 当前电梯是否到达乘客所在楼层 */
-    arrived: ArrivedStatus
+    private arrived: ArrivedStatus
+    private openFlag = false
     constructor(elevator: Elevator, arrived: ArrivedStatus) {
       this.elevator = deepClone(elevator)
       this.arrived = arrived
     }
 
+    private callerAction = (action: "getOn" | "getOff", caller: Caller) => {
+      if (!this.openFlag) {
+        return
+      }
+
+      if (action === "getOn") {
+        this.elevator.queue.push(caller)
+      } else {
+        this.elevator.queue.splice(
+          this.elevator.queue.findIndex((item) => item.flag === caller.flag),
+          1
+        )
+      }
+    }
+
     private openDoor() {
+      this.openFlag = true
+      const tempQueue = queue.filter(
+        (item) => item.currentFloor === this.elevator.currentFloor
+      )
+      tempQueue.push(
+        ...this.elevator.queue.filter(
+          (item) => item.currentFloor === this.elevator.currentFloor
+        )
+      )
+      // 乘客进出电梯
+      for (const caller of tempQueue) {
+        caller.openAction(this.elevator.currentFloor, this.callerAction)
+      }
       setBuilding(updatePureBuildingTranslateX(this.elevator, [-91, 91]))
 
       setTimeout(() => {
@@ -179,12 +218,29 @@ const App: Component = () => {
     private closeDoor() {
       setBuilding(updatePureBuildingTranslateX(this.elevator, [0, 0]))
       setTimeout(() => {
+        // 门彻底关闭，不再允许乘客上下电梯
+        this.openFlag = false
+        for (const caller of this.elevator.queue) {
+          if (
+            caller.targetFloor &&
+            !this.elevator.floorList.includes(caller.targetFloor)
+          ) {
+            this.elevator.floorList.push(caller.targetFloor)
+          }
+        }
+
+        const index = this.elevator.floorList.indexOf(
+          this.elevator.currentFloor
+        )
+        if (index !== -1) {
+          this.elevator.floorList.splice(index, 1)
+        }
         this.toNextFloor()
       }, DOOR_ACTION_TIME)
     }
 
     private toNextFloor() {
-      // 如果电梯跑完 floorList 的所有楼层，电梯恢复为等待状态
+      // 如果电梯跑完 floorList 的所有楼层，电梯恢复为等待状态，实例生命周期走完
       if (!this.elevator.floorList.length) {
         this.elevator.direction = Direction.stop
         this.elevator.elevatorStatus = ElevatorStatus.pending
@@ -233,10 +289,7 @@ const App: Component = () => {
       }
       setTimeout(() => {
         setElevators(quickSetElevators(this.elevator))
-        if (this.elevator.queue.find((item) => item.isMainView)?.targetFloor) {
-          setPersonCurrentFloor((p) =>
-            this.elevator.direction === Direction.up ? p + 1 : p - 1
-          )
+        for (const iterator of this.elevator.queue) {
         }
 
         this.run()
@@ -265,27 +318,16 @@ const App: Component = () => {
           this.elevator.elevatorStatus = ElevatorStatus.waiting
         }
 
-        // elevatorStatus 为 waiting 意味着电梯开门，乘客进出电梯
+        // elevatorStatus 为 waiting 电梯开门
         if (this.elevator.elevatorStatus === ElevatorStatus.waiting) {
-          const tempQueue = queue.filter(
-            (item) => item.currentFloor === this.elevator.currentFloor
-          )
-          tempQueue.push(...this.elevator.queue)
-          for (const caller of tempQueue) {
-            caller.action(this.elevator, caller)
-          }
-        }
-
-        if (index !== -1) {
-          this.elevator.floorList.splice(index, 1)
-        }
-
-        if (this.elevator.elevatorStatus !== ElevatorStatus.waiting) {
-          this.elevator.elevatorStatus === ElevatorStatus.running
-        } else {
-          setElevators(quickSetElevators(this.elevator))
-          this.openDoor()
+          batch(() => {
+            // 设置当前楼层为 waiting 状态 展示绿灯
+            setElevators(quickSetElevators(this.elevator))
+            this.openDoor()
+          })
           return
+        } else {
+          this.elevator.elevatorStatus === ElevatorStatus.running
         }
       }
 
@@ -345,25 +387,19 @@ const App: Component = () => {
           direction,
           targetFloor: null,
           isMainView: false,
-          action(elevator, caller) {
-            if (!caller.targetFloor) {
-              caller.targetFloor = random(MAX_FLOOR_NUM, 1)
+          openAction(elevatorCurrentFloor, callerAction) {
+            if (!this.targetFloor) {
+              this.targetFloor = random(MAX_FLOOR_NUM, 1)
               queue.splice(
-                queue.findIndex((item) => item.flag === caller.flag),
+                queue.findIndex((item) => item.flag === this.flag),
                 1
               )
-              elevator.queue.push(caller)
+              callerAction("getOn", this)
             }
-            if (!elevator.floorList.includes(caller.targetFloor)) {
-              elevator.floorList.push(caller.targetFloor)
-            }
-            if (caller.targetFloor === elevator.currentFloor) {
-              // 到达指定楼层的乘客下电梯
-              elevator.queue.splice(
-                elevator.queue.findIndex((item) => item.flag === caller.flag),
-                1
-              )
-              elevator
+
+            if (this.targetFloor === elevatorCurrentFloor) {
+              // 到达指定楼层下电梯
+              callerAction("getOff", this)
             }
           },
         })
@@ -381,7 +417,13 @@ const App: Component = () => {
       direction,
       targetFloor: null,
       isMainView: true,
-      action(elevator, caller) {},
+      openAction(elevator, caller) {
+        batch(() => {})
+      },
+      beforeRunning(currentFloor) {},
+      afterRunning(currentFloor) {
+        setPersonCurrentFloor(currentFloor)
+      },
     })
     callNearestVacantElevator()
   }
@@ -408,9 +450,11 @@ const App: Component = () => {
                       const elevator = createMemo(
                         () => elevators().find((e) => e.id === id)!
                       )
-                      const handleButtonStyle = createMemo<JSX.CSSProperties>(
-                        () => {
-                          return buildingElevator().translateX[0] === 0
+                      const enterButtonStyle =
+                        createMemo<JSX.CSSProperties | null>(() => {
+                          return item().level !== personCurrentFloor()
+                            ? null
+                            : buildingElevator().translateX[0] === 0
                             ? {
                                 transition: "width",
                                 width: 0,
@@ -422,8 +466,8 @@ const App: Component = () => {
                             : {
                                 width: "52px",
                               }
-                        }
-                      )
+                        })
+
                       return (
                         <div class="w-220px p-20px box-border flex flex-col items-center">
                           <div class="border h-40px w-full flex justify-around items-center">
@@ -485,12 +529,14 @@ const App: Component = () => {
                           </div>
 
                           <div class="border w-full h-190px flex justify-center relative">
-                            <div
-                              class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
-                              style={handleButtonStyle()}
-                            >
-                              进入
-                            </div>
+                            {enterButtonStyle() && (
+                              <div
+                                class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
+                                style={enterButtonStyle()!}
+                              >
+                                进入
+                              </div>
+                            )}
                             <Index each={buildingElevator().translateX}>
                               {(translateX) => {
                                 return (

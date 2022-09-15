@@ -61,7 +61,6 @@ type Caller = {
   currentFloor: number
   targetFloor: null | number
   direction: Direction.up | Direction.down
-  isMainView: boolean
   /** 电梯开门的时候调用此方法 */
   openAction: (
     elevatorCurrentFloor: number,
@@ -116,11 +115,6 @@ const App: Component = () => {
   onMount(() => {
     buildingElm!.scrollTop = buildingElm!.scrollHeight
     randomCalling()
-  })
-
-  const mainViewElevator = createMemo(() => {
-    const elevator = elevators().find((e) => e.queue.find((q) => q.isMainView))
-    elevator ? elevator : []
   })
 
   function quickSetElevators(elevator: Elevator) {
@@ -284,9 +278,7 @@ const App: Component = () => {
       }
 
       this.elevator.elevatorStatus = ElevatorStatus.running
-      if (this.elevator.queue.find((item) => item.isMainView)?.targetFloor) {
-        // moveScroll(this.elevator.direction)
-      }
+
       setTimeout(() => {
         setElevators(quickSetElevators(this.elevator))
         for (const iterator of this.elevator.queue) {
@@ -386,7 +378,6 @@ const App: Component = () => {
           currentFloor,
           direction,
           targetFloor: null,
-          isMainView: false,
           openAction(elevatorCurrentFloor, callerAction) {
             if (!this.targetFloor) {
               this.targetFloor = random(MAX_FLOOR_NUM, 1)
@@ -410,15 +401,24 @@ const App: Component = () => {
     }, random(3000, 500))
   }
 
+  let personAction: {
+    elevatorCurrentFloor: number | null
+    callerAction: ((action: "getOn" | "getOff", caller: Caller) => void) | null
+  } = {
+    elevatorCurrentFloor: null,
+    callerAction: null,
+  }
   function personCalling(direction: Direction.up | Direction.down) {
     queue.push({
       flag: flag++,
       currentFloor: personCurrentFloor(),
       direction,
       targetFloor: null,
-      isMainView: true,
-      openAction(elevator, caller) {
-        batch(() => {})
+      openAction(elevatorCurrentFloor, callerAction) {
+        personAction = {
+          elevatorCurrentFloor,
+          callerAction,
+        }
       },
       beforeRunning(currentFloor) {},
       afterRunning(currentFloor) {
@@ -427,6 +427,7 @@ const App: Component = () => {
     })
     callNearestVacantElevator()
   }
+  function getOnElevator() {}
 
   return (
     <div class="w-full h-full flex justify-center items-center py-20px box-border">
@@ -533,6 +534,7 @@ const App: Component = () => {
                               <div
                                 class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
                                 style={enterButtonStyle()!}
+                                onClick={() => getOnElevator()}
                               >
                                 进入
                               </div>

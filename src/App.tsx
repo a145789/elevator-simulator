@@ -53,16 +53,21 @@ const LIGHT_COLOR = [
 const random = (max: number, min = 0) => {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
-const deepClone = <T extends object | any[]>(obj: T): T => {
-  return JSON.parse(JSON.stringify(obj))
-}
 type Caller = {
   flag: number
   currentFloor: number
   targetFloor: null | number
   direction: Direction.up | Direction.down
+  /** 所乘坐的电梯 */
+  elevatorId: number | null
+  elevatorOpenDoorAction: {
+    elevatorId: number
+    elevatorCurrentFloor: number
+    callerAction: (action: "getOn" | "getOff", caller: Caller) => void
+  }[]
   /** 电梯开门的时候调用此方法 */
   openAction: (
+    elevatorId: number,
     elevatorCurrentFloor: number,
     callerAction: (action: "getOn" | "getOff", caller: Caller) => void
   ) => void
@@ -107,6 +112,7 @@ const App: Component = () => {
   const [elevators, setElevators] = createSignal(genElevator())
   const [building, setBuilding] = createSignal(genBuilding())
   const [personCurrentFloor, setPersonCurrentFloor] = createSignal(1)
+  const [mainView, setMainView] = createSignal<Caller | null>(null)
 
   const getVacantElevators = () =>
     elevators().filter(({ direction }) => direction === Direction.stop)
@@ -117,10 +123,14 @@ const App: Component = () => {
     randomCalling()
   })
 
-  function quickSetElevators(elevator: Elevator) {
+  function quickSetElevators({ floorList, queue, ...rest }: Elevator) {
     return (e: Elevator[]) => {
-      const index = e.findIndex((item) => item.id === elevator.id)
-      e.splice(index, 1, deepClone(elevator))
+      const index = e.findIndex((item) => item.id === rest.id)
+      e.splice(index, 1, {
+        ...rest,
+        floorList: [...floorList],
+        queue: [...queue],
+      })
       return [...e]
     }
   }
@@ -131,12 +141,14 @@ const App: Component = () => {
   ) {
     const { id, currentFloor } = elevator
     const index = MAX_FLOOR_NUM - currentFloor
-    const theBuilding = deepClone(building())
-    theBuilding[index].elevators[
-      theBuilding[index].elevators.findIndex((item) => item.id === id)
-    ].translateX = translateX
+    const theBuilding = building()
+    const item = { ...theBuilding[index] }
+    const eIdx = item.elevators.findIndex((item) => item.id === id)
+    item.elevators[eIdx].translateX = translateX
+    item.elevators[eIdx] = { ...item.elevators[eIdx] }
+    theBuilding[index] = item
 
-    return theBuilding
+    return [...theBuilding]
   }
 
   let isRunScrollAnimation = true
@@ -168,8 +180,11 @@ const App: Component = () => {
     /** 当前电梯是否到达乘客所在楼层 */
     private arrived: ArrivedStatus
     private openFlag = false
-    constructor(elevator: Elevator, arrived: ArrivedStatus) {
-      this.elevator = deepClone(elevator)
+    constructor(
+      { floorList, queue, ...rest }: Elevator,
+      arrived: ArrivedStatus
+    ) {
+      this.elevator = { ...rest, floorList: [...floorList], queue: [...queue] }
       this.arrived = arrived
     }
 
@@ -181,10 +196,12 @@ const App: Component = () => {
       if (action === "getOn") {
         this.elevator.queue.push(caller)
       } else {
-        this.elevator.queue.splice(
-          this.elevator.queue.findIndex((item) => item.flag === caller.flag),
-          1
+        const index = this.elevator.queue.findIndex(
+          (item) => item.flag === caller.flag
         )
+        if (index !== -1) {
+          this.elevator.queue.splice(index, 1)
+        }
       }
     }
 
@@ -195,12 +212,16 @@ const App: Component = () => {
       )
       tempQueue.push(
         ...this.elevator.queue.filter(
-          (item) => item.currentFloor === this.elevator.currentFloor
+          (item) => item.targetFloor === this.elevator.currentFloor
         )
       )
       // 乘客进出电梯
       for (const caller of tempQueue) {
-        caller.openAction(this.elevator.currentFloor, this.callerAction)
+        caller.openAction(
+          this.elevator.id,
+          this.elevator.currentFloor,
+          this.callerAction
+        )
       }
       setBuilding(updatePureBuildingTranslateX(this.elevator, [-91, 91]))
 
@@ -242,6 +263,11 @@ const App: Component = () => {
         return
       }
 
+      // TODO: wait
+      for (const caller of this.elevator.queue) {
+        caller.beforeRunning?.(this.elevator.currentFloor)
+      }
+
       switch (this.arrived) {
         case ArrivedStatus.no:
           // 电梯前往用户所在楼层
@@ -281,7 +307,8 @@ const App: Component = () => {
 
       setTimeout(() => {
         setElevators(quickSetElevators(this.elevator))
-        for (const iterator of this.elevator.queue) {
+        for (const caller of this.elevator.queue) {
+          caller.afterRunning?.(this.elevator.currentFloor)
         }
 
         this.run()
@@ -369,7 +396,7 @@ const App: Component = () => {
   function randomCalling() {
     clearTimeout(randomCallingTimer)
     randomCallingTimer = setTimeout(() => {
-      for (let i = 0, len = random(5, 1); i < len; i++) {
+      for (let i = 0, len = random(2, 1); i < len; i++) {
         const currentFloor = random(24, 1)
         const direction = random(9) < 5 ? Direction.down : Direction.up
         const callerFlag = flag++
@@ -377,17 +404,22 @@ const App: Component = () => {
           flag: callerFlag,
           currentFloor,
           direction,
+          elevatorId: null,
           targetFloor: null,
-          openAction(elevatorCurrentFloor, callerAction) {
+          elevatorOpenDoorAction: [],
+          openAction(elevatorId, elevatorCurrentFloor, callerAction) {
             if (!this.targetFloor) {
-              this.targetFloor = random(MAX_FLOOR_NUM, 1)
+              this.targetFloor = random(
+                this.direction === Direction.up ? MAX_FLOOR_NUM : 1,
+                this.currentFloor
+              )
               queue.splice(
                 queue.findIndex((item) => item.flag === this.flag),
                 1
               )
+              this.elevatorId = elevatorId
               callerAction("getOn", this)
             }
-
             if (this.targetFloor === elevatorCurrentFloor) {
               // 到达指定楼层下电梯
               callerAction("getOff", this)
@@ -398,36 +430,68 @@ const App: Component = () => {
 
       callNearestVacantElevator()
       randomCalling()
-    }, random(3000, 500))
+    }, random(5000, 3000))
   }
 
-  let personAction: {
-    elevatorCurrentFloor: number | null
-    callerAction: ((action: "getOn" | "getOff", caller: Caller) => void) | null
-  } = {
-    elevatorCurrentFloor: null,
-    callerAction: null,
-  }
   function personCalling(direction: Direction.up | Direction.down) {
-    queue.push({
+    if (mainView()) {
+      // 已经召唤过电梯，可更改方向
+      setMainView((mainView) => {
+        mainView!.direction = direction
+        return { ...mainView! }
+      })
+      callNearestVacantElevator()
+      return
+    }
+    const mV: Caller = {
       flag: flag++,
       currentFloor: personCurrentFloor(),
       direction,
       targetFloor: null,
-      openAction(elevatorCurrentFloor, callerAction) {
-        personAction = {
-          elevatorCurrentFloor,
-          callerAction,
-        }
+      elevatorId: null,
+      elevatorOpenDoorAction: [],
+      openAction(elevatorId, elevatorCurrentFloor, callerAction) {
+        setMainView((mainView) => {
+          mainView!.elevatorOpenDoorAction.push({
+            elevatorId,
+            elevatorCurrentFloor,
+            callerAction,
+          })
+          return { ...mainView! }
+        })
       },
       beforeRunning(currentFloor) {},
       afterRunning(currentFloor) {
         setPersonCurrentFloor(currentFloor)
       },
-    })
+    }
+
+    setMainView(mV)
+    queue.push(mV)
     callNearestVacantElevator()
   }
-  function getOnElevator() {}
+  function getOnElevator(elevatorId: number) {
+    const theMainView = mainView()
+    if (!theMainView || theMainView.elevatorId !== null) {
+      return
+    }
+    const action = theMainView.elevatorOpenDoorAction.find(
+      (item) => item.elevatorId === elevatorId
+    )!
+    theMainView.elevatorId = elevatorId
+    action.callerAction("getOn", theMainView)
+    theMainView.elevatorOpenDoorAction = []
+    setMainView({ ...theMainView })
+  }
+  function getOffElevator() {
+    const theMainView = mainView()
+    if (!theMainView || theMainView.elevatorId === null) {
+      return
+    }
+    const action = theMainView.elevatorOpenDoorAction[0]
+    action.callerAction("getOff", theMainView)
+    setMainView(null)
+  }
 
   return (
     <div class="w-full h-full flex justify-center items-center py-20px box-border">
@@ -527,18 +591,23 @@ const App: Component = () => {
                                 ? "up"
                                 : "down"}
                             </div>
+                            <div class="w-24px h-24px border text-center">
+                              {`${elevator().queue.length}人`}
+                            </div>
                           </div>
 
                           <div class="border w-full h-190px flex justify-center relative">
-                            {enterButtonStyle() && (
-                              <div
-                                class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
-                                style={enterButtonStyle()!}
-                                onClick={() => getOnElevator()}
-                              >
-                                进入
-                              </div>
-                            )}
+                            {mainView() &&
+                              mainView()!.elevatorId === null &&
+                              enterButtonStyle() && (
+                                <div
+                                  class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
+                                  style={enterButtonStyle()!}
+                                  onClick={() => getOnElevator(elevator().id)}
+                                >
+                                  进入
+                                </div>
+                              )}
                             <Index each={buildingElevator().translateX}>
                               {(translateX) => {
                                 return (
@@ -576,7 +645,9 @@ const App: Component = () => {
           </ul>
           <ul class="flex">{/* <Index each={}></Index> */}</ul>
           <div>
-            <button>出门</button>
+            {mainView() && mainView()!.elevatorId !== null && (
+              <button onClick={() => getOffElevator()}>出门</button>
+            )}
           </div>
         </div>
       </div>

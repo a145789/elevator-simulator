@@ -4,88 +4,25 @@ import {
   createMemo,
   createSignal,
   Index,
-  JSX,
   onMount,
 } from "solid-js"
-
-const MAX_FLOOR_NUM = 24 as const
-
-const MAX_ELEVATOR_NUM = 4 as const
-
-const ELEVATOR_THROUGH_FLOOR_TIME = 1500
-
-const ELEVATOR_WAITING_TIME = 4000 as const
-
-const DOOR_ACTION_TIME = 2500 as const
-
-const enum ElevatorStatus {
-  /** 电梯正在运行中 */
-  running,
-  /** 电梯停止等待召唤 */
-  pending,
-  /** 开门等待进入 */
-  waiting,
-}
-
-const enum Direction {
-  up,
-  down,
-  stop,
-}
-
-const enum ArrivedStatus {
-  no,
-  /** 电梯到达用户所在楼层 */
-  ok,
-}
-
-const enum LightColor {
-  red = "#F76965",
-  yellow = "#ff9626",
-  green = "#27c346",
-}
-const LIGHT_COLOR = [
-  LightColor.red,
-  LightColor.yellow,
-  LightColor.green,
-] as const
-
-const random = (max: number, min = 0) => {
-  return Math.floor(Math.random() * (max - min + 1)) + min
-}
-type Caller = {
-  flag: number
-  currentFloor: number
-  targetFloor: null | number
-  direction: Direction.up | Direction.down
-  /** 所乘坐的电梯 */
-  elevatorId: number | null
-  elevatorOpenDoorAction: {
-    elevatorId: number
-    elevatorCurrentFloor: number
-    callerAction: (action: "getOn" | "getOff", caller: Caller) => void
-  }[]
-  /** 电梯开门的时候调用此方法 */
-  openAction: (
-    elevatorId: number,
-    elevatorCurrentFloor: number,
-    callerAction: (action: "getOn" | "getOff", caller: Caller) => void
-  ) => void
-  /** 电梯运行前的回调 */
-  beforeRunning?: (floor: number) => void
-  /** 电梯运行后的回调 */
-  afterRunning?: (floor: number) => void
-}
-type Elevator = {
-  id: number
-  currentFloor: number
-  elevatorStatus: ElevatorStatus
-  direction: Direction
-  /** 电梯所要走的楼层 */
-  floorList: number[]
-  /** 电梯搭载的乘客 */
-  queue: Caller[]
-}
+import GetInButton from "./components/GetInButton"
+import {
+  ArrivedStatus,
+  Caller,
+  Direction,
+  DOOR_ACTION_TIME,
+  Elevator,
+  ElevatorStatus,
+  ELEVATOR_THROUGH_FLOOR_TIME,
+  ELEVATOR_WAITING_TIME,
+  LightColor,
+  LIGHT_COLOR,
+  MAX_ELEVATOR_NUM,
+  MAX_FLOOR_NUM,
+  MAX_LOAD_LIMIT,
+  random,
+} from "./constants"
 
 let flag = 0
 const queue: Caller[] = []
@@ -188,13 +125,16 @@ const App: Component = () => {
       this.arrived = arrived
     }
 
-    private callerAction = (action: "getOn" | "getOff", caller: Caller) => {
+    private callerAction = (action: "getIn" | "getOut", caller: Caller) => {
       if (!this.openFlag) {
         return
       }
 
-      if (action === "getOn") {
-        this.elevator.queue.push(caller)
+      if (action === "getIn") {
+        // 限载8人，超过等下一辆
+        if (this.elevator.queue.length < MAX_LOAD_LIMIT) {
+          this.elevator.queue.push(caller)
+        }
       } else {
         const index = this.elevator.queue.findIndex(
           (item) => item.flag === caller.flag
@@ -241,6 +181,20 @@ const App: Component = () => {
             !this.elevator.floorList.includes(caller.targetFloor)
           ) {
             this.elevator.floorList.push(caller.targetFloor)
+          }
+        }
+
+        // 如果没有超过限载，也没有选择上电梯，丢弃当前行为
+        if (this.elevator.queue.length < MAX_LOAD_LIMIT) {
+          for (let i = 0; i < queue.length; i++) {
+            const caller = queue[i]
+            if (
+              caller.direction === this.elevator.direction &&
+              caller.currentFloor === this.elevator.currentFloor
+            ) {
+              queue.splice(i, 1)
+              i--
+            }
           }
         }
 
@@ -418,11 +372,11 @@ const App: Component = () => {
                 1
               )
               this.elevatorId = elevatorId
-              callerAction("getOn", this)
+              callerAction("getIn", this)
             }
             if (this.targetFloor === elevatorCurrentFloor) {
               // 到达指定楼层下电梯
-              callerAction("getOff", this)
+              callerAction("getOut", this)
             }
           },
         })
@@ -436,11 +390,12 @@ const App: Component = () => {
   function personCalling(direction: Direction.up | Direction.down) {
     if (mainView()) {
       // 已经召唤过电梯，可更改方向
-      setMainView((mainView) => {
-        mainView!.direction = direction
-        return { ...mainView! }
-      })
-      callNearestVacantElevator()
+      if (mainView()!.direction !== direction) {
+        setMainView((mainView) => {
+          mainView!.direction = direction
+          return { ...mainView! }
+        })
+      }
       return
     }
     const mV: Caller = {
@@ -470,7 +425,7 @@ const App: Component = () => {
     queue.push(mV)
     callNearestVacantElevator()
   }
-  function getOnElevator(elevatorId: number) {
+  function getInElevator(elevatorId: number) {
     const theMainView = mainView()
     if (!theMainView || theMainView.elevatorId !== null) {
       return
@@ -479,17 +434,17 @@ const App: Component = () => {
       (item) => item.elevatorId === elevatorId
     )!
     theMainView.elevatorId = elevatorId
-    action.callerAction("getOn", theMainView)
+    action.callerAction("getIn", theMainView)
     theMainView.elevatorOpenDoorAction = []
     setMainView({ ...theMainView })
   }
-  function getOffElevator() {
+  function getOutElevator() {
     const theMainView = mainView()
     if (!theMainView || theMainView.elevatorId === null) {
       return
     }
     const action = theMainView.elevatorOpenDoorAction[0]
-    action.callerAction("getOff", theMainView)
+    action.callerAction("getOut", theMainView)
     setMainView(null)
   }
 
@@ -515,23 +470,15 @@ const App: Component = () => {
                       const elevator = createMemo(
                         () => elevators().find((e) => e.id === id)!
                       )
-                      const enterButtonStyle =
-                        createMemo<JSX.CSSProperties | null>(() => {
-                          return item().level !== personCurrentFloor()
-                            ? null
-                            : buildingElevator().translateX[0] === 0
-                            ? {
-                                transition: "width",
-                                width: 0,
-                                "transition-delay": `${DOOR_ACTION_TIME / 4}ms`,
-                                "transition-duration": `${
-                                  DOOR_ACTION_TIME / 2
-                                }ms`,
-                              }
-                            : {
-                                width: "52px",
-                              }
-                        })
+                      const isShowGetInBtn = createMemo(() =>
+                        Boolean(
+                          item().level === personCurrentFloor() &&
+                            elevator().currentFloor === personCurrentFloor() &&
+                            mainView() &&
+                            mainView()!.elevatorId === null &&
+                            elevator().queue.length < MAX_LOAD_LIMIT
+                        )
+                      )
 
                       return (
                         <div class="w-220px p-20px box-border flex flex-col items-center">
@@ -597,17 +544,14 @@ const App: Component = () => {
                           </div>
 
                           <div class="border w-full h-190px flex justify-center relative">
-                            {mainView() &&
-                              mainView()!.elevatorId === null &&
-                              enterButtonStyle() && (
-                                <div
-                                  class="h-26px box-border py-4px whitespace-nowrap text-center border top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 absolute overflow-hidden break-all  "
-                                  style={enterButtonStyle()!}
-                                  onClick={() => getOnElevator(elevator().id)}
-                                >
-                                  进入
-                                </div>
-                              )}
+                            {isShowGetInBtn() && (
+                              <GetInButton
+                                isClose={buildingElevator().translateX[0] === 0}
+                                emitGetInElevator={() =>
+                                  getInElevator(elevator().id)
+                                }
+                              />
+                            )}
                             <Index each={buildingElevator().translateX}>
                               {(translateX) => {
                                 return (
@@ -646,7 +590,7 @@ const App: Component = () => {
           <ul class="flex">{/* <Index each={}></Index> */}</ul>
           <div>
             {mainView() && mainView()!.elevatorId !== null && (
-              <button onClick={() => getOffElevator()}>出门</button>
+              <button onClick={() => getOutElevator()}>出门</button>
             )}
           </div>
         </div>

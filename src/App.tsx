@@ -7,6 +7,7 @@ import {
   onMount,
 } from "solid-js"
 import GetInButton from "./components/GetInButton"
+import LedNumber from "./components/LedNumber"
 import {
   ArrivedStatus,
   Caller,
@@ -458,13 +459,16 @@ const App: Component = () => {
   return (
     <div class="w-full h-full flex justify-center items-center py-20px box-border">
       <div class="flex items-center h-full">
-        <div class="border-y-1px h-full overflow-y-hidden" ref={buildingElm}>
+        <div
+          class="border-y-1px border-[#c0c0c0] h-full overflow-y-hidden"
+          ref={buildingElm}
+        >
           <Index each={building()}>
             {(item, index) => {
               const floor = item()
               return (
                 <div
-                  class="flex h-300px items-center"
+                  class="flex h-300px items-center border-[#c0c0c0]"
                   classList={{
                     "border-b-1px": index + 1 !== building().length,
                   }}
@@ -489,7 +493,7 @@ const App: Component = () => {
 
                       return (
                         <div class="w-220px p-20px box-border flex flex-col items-center">
-                          <div class="border h-40px w-full flex justify-around items-center">
+                          <div class="border border-[#b0b7c5] h-40px w-full flex justify-around items-center">
                             <Index each={LIGHT_COLOR}>
                               {(color) => {
                                 const c = color()
@@ -550,7 +554,7 @@ const App: Component = () => {
                             </div>
                           </div>
 
-                          <div class="border w-full h-190px flex justify-center relative">
+                          <div class="border border-[#b0b7c5] w-full h-190px flex justify-center relative">
                             {isShowGetInBtn() && (
                               <GetInButton
                                 isClose={buildingElevator().translateX[0] === 0}
@@ -563,7 +567,7 @@ const App: Component = () => {
                               {(translateX) => {
                                 return (
                                   <div
-                                    class="w-1px h-full bg-#000 transition-transform ease"
+                                    class="w-1px h-full bg-#b0b7c5 transition-transform ease"
                                     style={{
                                       "transition-duration": `${DOOR_ACTION_TIME}ms`,
                                       transform: `translateX(${translateX()}px)`,
@@ -599,6 +603,9 @@ const App: Component = () => {
             {mainView() && mainView()!.elevatorId !== null && (
               <button onClick={() => getOutElevator()}>出门</button>
             )}
+          </div>
+          <div>
+            <LedNumber number={1} />
           </div>
         </div>
       </div>

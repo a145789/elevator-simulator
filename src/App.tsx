@@ -56,8 +56,11 @@ const App: Component = () => {
 
   let buildingElm: HTMLDivElement | undefined
   onMount(() => {
-    buildingElm!.scrollTop = buildingElm!.scrollHeight
-    randomCalling()
+    // 刚进入时 scrollTop 有几率不会到达最底部
+    setTimeout(() => {
+      buildingElm!.scrollTop = buildingElm!.scrollHeight
+      randomCalling()
+    })
   })
 
   function quickSetElevators({ floorList, queue, ...rest }: Elevator) {
@@ -163,7 +166,10 @@ const App: Component = () => {
           this.callerAction
         )
       }
-      setBuilding(updatePureBuildingTranslateX(this.elevator, [-91, 91]))
+      // 延时更新
+      setTimeout(() => {
+        setBuilding(updatePureBuildingTranslateX(this.elevator, [-91, 91]))
+      })
 
       setTimeout(() => {
         this.closeDoor()
@@ -310,6 +316,7 @@ const App: Component = () => {
 
   function callNearestVacantElevator() {
     const SchedulingList: Scheduling[] = []
+    // TODO: 此处有问题，会重复召唤电梯
     for (let i = 0; i < queue.length; i++) {
       const vacantElevators = getVacantElevators()
       if (!vacantElevators.length) {

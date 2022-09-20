@@ -58,17 +58,18 @@ export type Caller = {
     callerAction: (action: "getIn" | "getOut", caller: Caller) => void
   }[]
   /** 电梯开门的时候调用此方法 */
-  openAction: (
+  onOpen: (
     elevatorId: number,
     elevatorCurrentFloor: number,
     callerAction: (action: "getIn" | "getOut", caller: Caller) => void
   ) => void
+  onClose?: () => void
   /** 电梯运行前的回调 */
   beforeRunning?: (floor: number) => void
   /** 电梯运行后的回调 */
   afterRunning?: (floor: number) => void
 }
-export type Elevator = {
+export type Elevator<T = any> = {
   id: number
   currentFloor: number
   elevatorStatus: ElevatorStatus
@@ -77,4 +78,16 @@ export type Elevator = {
   floorList: number[]
   /** 电梯搭载的乘客 */
   queue: Caller[]
+  scheduling: T | null
+}
+
+type Number = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+
+export function transformFloorNumber(number: number, digits: 1 | 2) {
+  const str = String(number)
+  if (digits === 1) {
+    return Number(str.length === 2 ? str[1] : str) as Number
+  } else {
+    return str.length === 2 ? (Number(str[0]) as Number) : null
+  }
 }

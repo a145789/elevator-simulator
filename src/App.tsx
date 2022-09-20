@@ -23,21 +23,11 @@ import {
   MAX_FLOOR_NUM,
   MAX_LOAD_LIMIT,
   random,
+  transformFloorNumber,
 } from "./constants"
 
 let flag = 0
 const queue: Caller[] = []
-
-type Number = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
-
-function transformFloorNumber(number: number, digits: 1 | 2) {
-  const str = String(number)
-  if (digits === 1) {
-    return Number(str.length === 2 ? str[1] : str) as Number
-  } else {
-    return str.length === 2 ? (Number(str[0]) as Number) : null
-  }
-}
 
 const genElevator = (): Elevator[] =>
   Array.from({ length: MAX_ELEVATOR_NUM }).map((_, index) => ({
@@ -47,6 +37,7 @@ const genElevator = (): Elevator[] =>
     direction: Direction.stop,
     floorList: [],
     queue: [],
+    scheduling: null,
   }))
 const genBuilding = () =>
   Array.from({ length: MAX_FLOOR_NUM }).map((_, index) => ({
@@ -58,7 +49,9 @@ const genBuilding = () =>
   }))
 
 const App: Component = () => {
-  const [elevators, setElevators] = createSignal(genElevator())
+  const [elevators, setElevators] = createSignal<Elevator<Scheduling>[]>(
+    genElevator()
+  )
   const [building, setBuilding] = createSignal(genBuilding())
   const [personCurrentFloor, setPersonCurrentFloor] = createSignal(1)
   const [mainView, setMainView] = createSignal<Caller | null>(null)
@@ -75,7 +68,11 @@ const App: Component = () => {
     })
   })
 
-  function quickSetElevators({ floorList, queue, ...rest }: Elevator) {
+  function quickSetElevators({
+    floorList,
+    queue,
+    ...rest
+  }: Elevator<Scheduling>) {
     return (e: Elevator[]) => {
       const index = e.findIndex((item) => item.id === rest.id)
       e.splice(index, 1, {
@@ -128,7 +125,7 @@ const App: Component = () => {
 
   // 每次召唤电梯生成一个实例
   class Scheduling {
-    private elevator: Elevator
+    private elevator: Elevator<Scheduling>
     /** 当前电梯是否到达乘客所在楼层 */
     private arrived: ArrivedStatus
     private openFlag = false
@@ -160,7 +157,17 @@ const App: Component = () => {
       }
     }
 
-    private openDoor() {
+    private openDoorTimer: number | null = null
+    public openDoor() {
+      // 正在开门中不执行
+      if (this.openDoorTimer !== null) {
+        return
+      }
+      // 如果在关门中取消关门
+      if (this.closeDoorTimer !== null) {
+        clearTimeout(this.closeDoorTimer)
+        this.closeDoorTimer = null
+      }
       this.openFlag = true
       const tempQueue = queue.filter(
         (item) => item.currentFloor === this.elevator.currentFloor
@@ -172,7 +179,7 @@ const App: Component = () => {
       )
       // 乘客进出电梯
       for (const caller of tempQueue) {
-        caller.openAction(
+        caller.onOpen(
           this.elevator.id,
           this.elevator.currentFloor,
           this.callerAction
@@ -183,17 +190,28 @@ const App: Component = () => {
         setBuilding(updatePureBuildingTranslateX(this.elevator, [-91, 91]))
       })
 
-      setTimeout(() => {
+      this.openDoorTimer = setTimeout(() => {
+        this.openDoorTimer = null
         this.closeDoor()
       }, ELEVATOR_WAITING_TIME + DOOR_ACTION_TIME)
     }
 
-    private closeDoor() {
+    private closeDoorTimer: number | null = null
+    public closeDoor() {
+      if (this.closeDoorTimer !== null) {
+        return
+      }
+      if (this.openDoorTimer !== null) {
+        clearTimeout(this.openDoorTimer)
+        this.openDoorTimer = null
+      }
       setBuilding(updatePureBuildingTranslateX(this.elevator, [0, 0]))
-      setTimeout(() => {
+      this.closeDoorTimer = setTimeout(() => {
+        this.closeDoorTimer = null
         // 门彻底关闭，不再允许乘客上下电梯
         this.openFlag = false
         for (const caller of this.elevator.queue) {
+          caller.onClose?.()
           if (
             caller.targetFloor &&
             !this.elevator.floorList.includes(caller.targetFloor)
@@ -289,6 +307,11 @@ const App: Component = () => {
     }
 
     public run() {
+      if (this.elevator.scheduling === null) {
+        this.elevator.scheduling = elevators().find(
+          (item) => item.id === this.elevator.id
+        )!.scheduling
+      }
       // 电梯到达指定楼层后，搭载乘客、去往指定楼层、开关电梯门的相关操作
       if (this.arrived === ArrivedStatus.ok) {
         // 如果当前已经接好乘客去往指定楼层，路上可以带上同样方向的其他楼层的乘客
@@ -349,16 +372,15 @@ const App: Component = () => {
       if (!elevator.floorList.includes(caller.currentFloor)) {
         elevator.floorList.push(caller.currentFloor)
       }
-      setElevators(quickSetElevators(elevator))
 
-      SchedulingList.push(
-        new Scheduling(
-          elevator,
-          elevator.currentFloor === caller.currentFloor
-            ? ArrivedStatus.ok
-            : ArrivedStatus.no
-        )
+      elevator.scheduling = new Scheduling(
+        elevator,
+        elevator.currentFloor === caller.currentFloor
+          ? ArrivedStatus.ok
+          : ArrivedStatus.no
       )
+      SchedulingList.push(elevator.scheduling)
+      setElevators(quickSetElevators(elevator))
     }
 
     for (const scheduling of SchedulingList) {
@@ -380,7 +402,7 @@ const App: Component = () => {
           elevatorId: null,
           targetFloor: null,
           elevatorOpenDoorAction: [],
-          openAction(elevatorId, elevatorCurrentFloor, callerAction) {
+          onOpen(elevatorId, elevatorCurrentFloor, callerAction) {
             if (!this.targetFloor) {
               this.targetFloor = random(
                 this.direction === Direction.up ? MAX_FLOOR_NUM : 1,
@@ -424,13 +446,22 @@ const App: Component = () => {
       targetFloor: null,
       elevatorId: null,
       elevatorOpenDoorAction: [],
-      openAction(elevatorId, elevatorCurrentFloor, callerAction) {
+      onOpen(elevatorId, elevatorCurrentFloor, callerAction) {
         setMainView((mainView) => {
           mainView!.elevatorOpenDoorAction.push({
             elevatorId,
             elevatorCurrentFloor,
             callerAction,
           })
+          mainView!.elevatorOpenDoorAction = [
+            ...mainView!.elevatorOpenDoorAction,
+          ]
+          return { ...mainView! }
+        })
+      },
+      onClose() {
+        setMainView((mainView) => {
+          mainView!.elevatorOpenDoorAction = []
           return { ...mainView! }
         })
       },
@@ -449,6 +480,10 @@ const App: Component = () => {
     if (!theMainView || theMainView.elevatorId !== null) {
       return
     }
+
+    const elevator = elevators().find((item) => item.id === elevatorId)!
+    elevator.scheduling?.openDoor()
+
     const action = theMainView.elevatorOpenDoorAction.find(
       (item) => item.elevatorId === elevatorId
     )!
@@ -462,6 +497,12 @@ const App: Component = () => {
     if (!theMainView || theMainView.elevatorId === null) {
       return
     }
+
+    const elevator = elevators().find(
+      (item) => item.id === theMainView.elevatorId
+    )!
+    elevator.scheduling?.closeDoor()
+
     const action = theMainView.elevatorOpenDoorAction[0]
     action.callerAction("getOut", theMainView)
     setMainView(null)
@@ -572,7 +613,7 @@ const App: Component = () => {
                                 : "down"}
                             </div>
                             <div class="w-24px h-24px border text-center">
-                              {`${elevator().queue.length}人`}
+                              {`${elevator().queue.length}`}
                             </div>
                           </div>
 
@@ -622,9 +663,10 @@ const App: Component = () => {
           </ul>
           <ul class="flex">{/* <Index each={}></Index> */}</ul>
           <div>
-            {mainView() && mainView()!.elevatorId !== null && (
-              <button onClick={() => getOutElevator()}>出门</button>
-            )}
+            {mainView()?.elevatorId !== null &&
+              mainView()?.elevatorOpenDoorAction.length && (
+                <button onClick={() => getOutElevator()}>出门</button>
+              )}
           </div>
           <div></div>
         </div>

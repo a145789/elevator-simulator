@@ -28,6 +28,17 @@ import {
 let flag = 0
 const queue: Caller[] = []
 
+type Number = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+
+function transformFloorNumber(number: number, digits: 1 | 2) {
+  const str = String(number)
+  if (digits === 1) {
+    return Number(str.length === 2 ? str[1] : str) as Number
+  } else {
+    return str.length === 2 ? (Number(str[0]) as Number) : null
+  }
+}
+
 const genElevator = (): Elevator[] =>
   Array.from({ length: MAX_ELEVATOR_NUM }).map((_, index) => ({
     id: index,
@@ -541,8 +552,19 @@ const App: Component = () => {
                           </div>
 
                           <div class="w-full my-4px flex justify-around">
-                            <div class="w-24px h-24px border text-center">
-                              {elevator().currentFloor}
+                            <div>
+                              <LedNumber
+                                number={transformFloorNumber(
+                                  elevator().currentFloor,
+                                  2
+                                )}
+                              />
+                              <LedNumber
+                                number={transformFloorNumber(
+                                  elevator().currentFloor,
+                                  1
+                                )}
+                              />
                             </div>
                             <div class="w-24px h-24px border text-center">
                               {elevator().direction === Direction.up
@@ -604,9 +626,7 @@ const App: Component = () => {
               <button onClick={() => getOutElevator()}>出门</button>
             )}
           </div>
-          <div>
-            <LedNumber number={1} />
-          </div>
+          <div></div>
         </div>
       </div>
     </div>

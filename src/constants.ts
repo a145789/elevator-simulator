@@ -45,31 +45,19 @@ export const LIGHT_COLOR = [
 export const random = (max: number, min = 0) => {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
-export type CallerType<Caller = any> = {
+export type Caller = {
   flag: number
   currentFloor: number
-  /** 所乘坐的电梯 */
-  elevatorId: number | null
   /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
-  whenOpenDoorCallerActionList: {
-    elevatorId: number
-    elevatorCurrentFloor: number
-    callerAction: (action: "getIn" | "getOut", caller: Caller) => void
-  }[]
+  whenOpenDoorCallerActionList: ((action: "getIn" | "getOut", caller: Caller) => void
+  )[]
   /** 电梯开门会调用此方法 */
   onOpen: (
-    elevatorId: number,
-    elevatorCurrentFloor: number,
     /** 乘客选择进出门的回调 */
     callerAction: (action: "getIn" | "getOut", caller: Caller) => void
   ) => void
-  onClose?: () => void
-  /** 电梯开始运行前的回调 */
-  beforeRunning?: (floor: number) => void
-  /** 电梯运行后的回调 */
-  afterRunning?: (floor: number) => void
 }
-export type Elevator<Scheduling = any, Caller = any> = {
+export type Elevator<Scheduling = any> = {
   id: number
   currentFloor: number
   elevatorStatus: ElevatorStatus

@@ -10,7 +10,7 @@ import GetInButton from "./components/GetInButton"
 import LedNumber from "./components/LedNumber"
 import {
   ArrivedStatus,
-  CallerType,
+  Caller,
   Direction,
   DOOR_ACTION_TIME,
   Elevator,
@@ -42,6 +42,7 @@ const genElevator = (): Elevator[] =>
 const genBuilding = () =>
   Array.from({ length: MAX_FLOOR_NUM }).map((_, index) => ({
     level: MAX_FLOOR_NUM - index,
+    direction: [] as Direction[],
     elevators: Array.from({ length: MAX_ELEVATOR_NUM }).map((_, eIdx) => ({
       id: eIdx,
       translateX: [0, 0] as [number, number],
@@ -61,7 +62,7 @@ const App: Component = () => {
 
   let buildingElm: HTMLDivElement | undefined
   onMount(() => {
-    // 刚进入时 scrollTop 有几率不会到达最底部
+    // 刚进入时 scrollTop scrollHeight 有几率不是最长的
     setTimeout(() => {
       buildingElm!.scrollTop = buildingElm!.scrollHeight
       randomCalling()
@@ -121,34 +122,6 @@ const App: Component = () => {
       requestAnimationFrame(cb)
     }
     requestAnimationFrame(cb)
-  }
-
-  /**
-   * 乘客实例
-   * 乘客按下召唤电梯的按钮，生成此实例
-   * 如果当电梯来临乘客没有上电梯或者走出电梯，实例结束
-   */
-  class Caller {
-    private readonly flag: CallerType["flag"]
-    private readonly currentFloor: CallerType["currentFloor"]
-
-    onOpen: CallerType["onOpen"]
-
-    constructor({
-      flag,
-      currentFloor,
-      onOpen,
-    }: Omit<CallerType, "whenOpenDoorCallerActionList">) {
-      this.flag = flag
-      this.currentFloor = currentFloor
-      this.onOpen = onOpen
-    }
-
-    /** 所乘坐的电梯 */
-    private elevatorId: CallerType["elevatorId"] = null
-    /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
-    whenOpenDoorCallerActionList: CallerType["whenOpenDoorCallerActionList"] =
-      []
   }
 
   /**
@@ -431,27 +404,13 @@ const App: Component = () => {
         queue.push({
           flag: callerFlag,
           currentFloor,
-          direction,
-          elevatorId: null,
-          targetFloor: null,
           whenOpenDoorCallerActionList: [],
-          onOpen(elevatorId, elevatorCurrentFloor, callerAction) {
-            if (!this.targetFloor) {
-              this.targetFloor = random(
-                this.direction === Direction.up ? MAX_FLOOR_NUM : 1,
-                this.currentFloor
-              )
-              queue.splice(
-                queue.findIndex((item) => item.flag === this.flag),
-                1
-              )
-              this.elevatorId = elevatorId
-              callerAction("getIn", this)
-            }
-            if (this.targetFloor === elevatorCurrentFloor) {
-              // 到达指定楼层下电梯
-              callerAction("getOut", this)
-            }
+          onOpen(callerAction) {
+            queue.splice(
+              queue.findIndex((item) => item.flag === this.flag),
+              1
+            )
+            callerAction("getIn", this)
           },
         })
       }
@@ -475,8 +434,6 @@ const App: Component = () => {
     const mV: Caller = {
       flag: flag++,
       currentFloor: personCurrentFloor(),
-      direction,
-      targetFloor: null,
       elevatorId: null,
       whenOpenDoorCallerActionList: [],
       onOpen(elevatorId, elevatorCurrentFloor, callerAction) {

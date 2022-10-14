@@ -10,13 +10,15 @@ export const DOOR_ACTION_TIME = 2500 as const
 
 export const MAX_LOAD_LIMIT = 8 as const
 
+export const MAX_RANDOM_PERSON_NUM = 12 as const
+
 export const enum ElevatorStatus {
   /** 电梯正在运行中 */
   running,
   /** 电梯停止等待召唤 */
   pending,
   /** 开门等待进入 */
-  waiting,
+  open,
 }
 
 export const enum Direction {
@@ -42,15 +44,20 @@ export const LIGHT_COLOR = [
   LightColor.green,
 ] as const
 
-export const random = (max: number, min = 0) => {
-  return Math.floor(Math.random() * (max - min + 1)) + min
+export const enum CallerStatus {
+  outside,
+  inside,
 }
+
 export type Caller = {
   flag: number
   currentFloor: number
+  callerStatus: CallerStatus
   /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
-  whenOpenDoorCallerActionList: ((action: "getIn" | "getOut", caller: Caller) => void
-  )[]
+  whenOpenDoorCallerActionList: ((
+    action: "getIn" | "getOut",
+    caller: Caller
+  ) => void)[]
   /** 电梯开门会调用此方法 */
   onOpen: (
     /** 乘客选择进出门的回调 */
@@ -62,8 +69,6 @@ export type Elevator<Scheduling = any> = {
   currentFloor: number
   elevatorStatus: ElevatorStatus
   direction: Direction
-  /** 电梯所要走的楼层 */
-  floorList: number[]
   /** 电梯搭载的乘客 */
   queue: Caller[]
   scheduling: Scheduling | null
@@ -78,4 +83,9 @@ export function transformFloorNumber(number: number, digits: 1 | 2) {
   } else {
     return str.length === 2 ? (Number(str[0]) as Number) : null
   }
+}
+
+/** [max-min] */
+export const random = (max: number, min = 0) => {
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }

@@ -44,15 +44,9 @@ export const LIGHT_COLOR = [
   LightColor.green,
 ] as const
 
-export const enum CallerStatus {
-  outside,
-  inside,
-}
-
-export type Caller = {
+export interface Caller {
   flag: number
-  currentFloor: number
-  callerStatus: CallerStatus
+  currentLevel: number
   /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
   whenOpenDoorCallerActionList: ((
     action: "getIn" | "getOut",
@@ -64,14 +58,26 @@ export type Caller = {
     callerAction: (action: "getIn" | "getOut", caller: Caller) => void
   ) => void
 }
-export type Elevator<Scheduling = any> = {
+export interface Elevator<Scheduling = any> {
   id: number
-  currentFloor: number
+  currentLevel: number
   elevatorStatus: ElevatorStatus
+  /** 乘客在电梯内按下去往楼层数 */
+  targetLevelList: number[]
   direction: Direction
   /** 电梯搭载的乘客 */
   queue: Caller[]
   scheduling: Scheduling | null
+}
+
+export interface Building {
+  level: number
+  direction: Direction[]
+  elevators: {
+    id: number
+    translateX: [number, number]
+  }[]
+  queue: Caller[]
 }
 
 type Number = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
@@ -88,4 +94,51 @@ export function transformFloorNumber(number: number, digits: 1 | 2) {
 /** [max-min] */
 export const random = (max: number, min = 0) => {
   return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+/** 是否有同方向在运行，并且搭乘人数没有超过可搭乘最大人数的电梯 */
+export function getIsHaveSameDirectionSpareElevator(
+  elevators: Elevator[],
+  direction: Direction,
+  level: number
+) {
+  return elevators.some((e) => {
+    if (e.queue.length >= MAX_LOAD_LIMIT || e.direction !== direction) {
+      return false
+    }
+
+    switch (e.direction) {
+      case Direction.down:
+        return e.currentLevel > level
+      case Direction.up:
+        return e.currentLevel < level
+      default:
+        return true
+    }
+  })
+}
+
+/** 获取同方向下的是否还有楼层需要电梯 */
+export function getSameDirectionNotNeedElevator(
+  building: Building[],
+  direction: Direction,
+  level: number
+) {
+  let notHaveTask = false
+  switch (direction) {
+    case Direction.down:
+      notHaveTask = !building
+        .slice(MAX_FLOOR_NUM - level + 1, MAX_FLOOR_NUM)
+        .some((item) => item.direction.length)
+      break
+    case Direction.up:
+      notHaveTask = !building
+        .slice(0, MAX_FLOOR_NUM - level)
+        .some((item) => item.direction.length)
+      break
+    default:
+      break
+  }
+
+  return notHaveTask
 }

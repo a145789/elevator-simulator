@@ -33,6 +33,11 @@ export const enum ArrivedStatus {
   ok,
 }
 
+export const enum CallerStatus {
+  outside,
+  inside,
+}
+
 export const enum LightColor {
   red = "#F76965",
   yellow = "#ff9626",
@@ -47,6 +52,8 @@ export const LIGHT_COLOR = [
 export interface Caller {
   flag: number
   currentLevel: number
+  /** 状态 */
+  callerStatus: CallerStatus
   /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
   whenOpenDoorCallerActionList: ((
     action: "getIn" | "getOut",
@@ -55,7 +62,7 @@ export interface Caller {
   /** 电梯开门会调用此方法 */
   onOpen: (
     /** 乘客选择进出门的回调 */
-    callerAction: (action: "getIn" | "getOut", caller: Caller) => void
+    callerAction: (caller: Caller) => void
   ) => void
 }
 export interface Elevator<Scheduling = any> {

@@ -55,12 +55,13 @@ export interface Caller {
   /** 状态 */
   callerStatus: CallerStatus
   /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
-  whenOpenDoorCallerActionList: ((
-    action: "getIn" | "getOut",
-    caller: Caller
-  ) => void)[]
+  whenOpenDoorCallerActionList: {
+    elevatorId: number
+    cb: (caller: Caller) => void
+  }[]
   /** 电梯开门会调用此方法 */
   onOpen: (
+    elevatorId: number,
     /** 乘客选择进出门的回调 */
     callerAction: (caller: Caller) => void
   ) => void

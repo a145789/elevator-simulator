@@ -12,6 +12,8 @@ export const MAX_LOAD_LIMIT = 8 as const
 
 export const MAX_RANDOM_PERSON_NUM = 12 as const
 
+export const WAIT_ASSIGN_FLOOR_TIME = 750 as const
+
 export const enum ElevatorStatus {
   /** 电梯正在运行中 */
   running,

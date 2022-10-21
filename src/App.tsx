@@ -29,6 +29,7 @@ import {
   MAX_RANDOM_PERSON_NUM,
   random,
   transformFloorNumber,
+  WAIT_ASSIGN_FLOOR_TIME,
 } from "./constants"
 
 let flag = 0
@@ -64,6 +65,13 @@ const App: Component = () => {
     callerStatus: CallerStatus.outside,
     whenOpenDoorCallerActionList: [],
     onOpen(elevatorId, callerAction) {
+      if (
+        mainView.whenOpenDoorCallerActionList.some(
+          (item) => item.elevatorId === elevatorId
+        )
+      ) {
+        return
+      }
       setMainView("whenOpenDoorCallerActionList", (list) => [
         ...list,
         {
@@ -170,9 +178,13 @@ const App: Component = () => {
       // 限载8人，超过等下一辆
       if (this.elevator.queue.length < MAX_LOAD_LIMIT) {
         this.elevator.queue.push(caller)
+        caller.onOpen(this.elevator.id, this.callerGetOutAction.bind(this))
       } else {
         // TODO: Message 提示 装不下
       }
+
+      // 每次进出都要延长电梯开门
+      this.openDoor()
     }
     private callerGetOutAction(caller: Caller) {
       if (!this.openFlag) {
@@ -182,6 +194,11 @@ const App: Component = () => {
         this.elevator.queue.findIndex((item) => item.flag === caller.flag),
         1
       )
+
+      caller.onOpen(this.elevator.id, this.callerGetInAction.bind(this))
+
+      // 每次进出都要延长电梯开门
+      this.openDoor()
     }
 
     private openDoorTimer: number | null = null
@@ -223,7 +240,10 @@ const App: Component = () => {
         // 门彻底关闭，不再允许乘客上下电梯
         this.openFlag = false
 
-        this.toNextFloor()
+        // 如果是搭载了乘客，延时一段时间，等待按去往楼层的按钮
+        setTimeout(() => {
+          this.toNextFloor()
+        }, WAIT_ASSIGN_FLOOR_TIME)
       }, DOOR_ACTION_TIME)
     }
 
@@ -247,7 +267,7 @@ const App: Component = () => {
               this.elevator.currentLevel
             ))
         ) {
-          // TODO: 处理电梯内部相反方向的乘客
+          // 处理电梯内部相反方向的乘客
           if (this.elevator.targetLevelList.length) {
             this.elevator.direction =
               this.elevator.direction === Direction.up
@@ -257,6 +277,7 @@ const App: Component = () => {
             // 恢复为等待状态
             this.elevator.direction = Direction.stop
             this.elevator.elevatorStatus = ElevatorStatus.pending
+            // TODO: 开启一个查询，查找是否还有需要电梯的楼层
             return
           }
         }
@@ -264,12 +285,14 @@ const App: Component = () => {
         this.elevator.elevatorStatus = ElevatorStatus.running
 
         setTimeout(() => {
-          this.elevator.currentLevel =
-            this.elevator.direction === Direction.up
-              ? this.elevator.currentLevel + 1
-              : this.elevator.currentLevel - 1
-          // TODO: 等待 0.75s 才开启运行
-          this.run()
+          batch(() => {
+            this.elevator.currentLevel =
+              this.elevator.direction === Direction.up
+                ? this.elevator.currentLevel + 1
+                : this.elevator.currentLevel - 1
+
+            this.run()
+          })
           isRunScrollAnimation = false
         }, ELEVATOR_THROUGH_FLOOR_TIME)
       })
@@ -294,7 +317,7 @@ const App: Component = () => {
             1
           )
 
-          // TODO: 通知所有在电梯内的乘客是否需要出电梯
+          // 通知所有在电梯内的乘客是否需要出电梯
           for (const caller of [...this.elevator.queue]) {
             caller.onOpen(this.elevator.id, this.callerGetOutAction.bind(this))
           }
@@ -309,7 +332,8 @@ const App: Component = () => {
             return [...d]
           })
 
-          //TODO: 通知此楼乘客是否上电梯
+          console.log(buildingQueue.length)
+          // 通知此楼乘客是否上电梯
           for (const caller of [...buildingQueue]) {
             caller.onOpen(this.elevator.id, this.callerGetInAction.bind(this))
           }
@@ -334,8 +358,8 @@ const App: Component = () => {
           this.elevator.elevatorStatus = ElevatorStatus.open
           this.elevator.direction = buildingDirection[0]
           setBuilding(currentBuildIndex, "direction", () => [])
-
-          //TODO: 通知此楼乘客是否上电梯
+          console.log(buildingQueue.length)
+          // 通知此楼乘客是否上电梯
           for (const caller of [...buildingQueue]) {
             caller.onOpen(this.elevator.id, this.callerGetInAction.bind(this))
           }
@@ -397,7 +421,7 @@ const App: Component = () => {
     randomCallingTimer = setTimeout(() => {
       batch(() => {
         const personNum = building.reduce((p, c) => p + c.queue.length, 0)
-        if (personNum >= MAX_RANDOM_PERSON_NUM) {
+        if (personNum === MAX_RANDOM_PERSON_NUM) {
           return
         }
         for (
@@ -405,19 +429,20 @@ const App: Component = () => {
           i < len;
           i++
         ) {
-          const currentLevel = random(24, 1)
           const direction = random(1) < 1 ? Direction.down : Direction.up
 
           let randomCaller: Caller | null = {
             flag: flag++,
-            currentLevel,
+            currentLevel: random(24, 1),
             callerStatus: CallerStatus.outside,
             whenOpenDoorCallerActionList: [],
             onOpen(_elevatorId, callerAction) {
               batch(() => {
                 if (randomCaller!.callerStatus === CallerStatus.outside) {
                   setBuilding(
-                    building.findIndex(({ level }) => level === currentLevel),
+                    building.findIndex(
+                      ({ level }) => level === randomCaller!.currentLevel
+                    ),
                     "queue",
                     (queue) => {
                       queue.splice(
@@ -434,11 +459,22 @@ const App: Component = () => {
                   callerAction(randomCaller!)
                   if (random(1) > 0) {
                     setBuilding(
-                      building.findIndex(({ level }) => level === currentLevel),
+                      building.findIndex(
+                        ({ level }) => level === randomCaller!.currentLevel
+                      ),
                       "queue",
                       (queue) => [...queue, randomCaller!]
                     )
-                    // TODO: 设定一个定时器随机几秒后再上下楼
+                    // 设定一个定时器随机几秒后再上下楼
+                    setTimeout(() => {
+                      const direction =
+                        random(1) < 1 ? Direction.down : Direction.up
+
+                      callNearestVacantElevator(
+                        randomCaller!.currentLevel,
+                        direction
+                      )
+                    }, random(6000))
                   } else {
                     randomCaller = null
                   }
@@ -448,12 +484,14 @@ const App: Component = () => {
           }
 
           setBuilding(
-            building.findIndex((item) => item.level === currentLevel),
+            building.findIndex(
+              (item) => item.level === randomCaller!.currentLevel
+            ),
             "queue",
             (queue) => [...queue, randomCaller!]
           )
 
-          callNearestVacantElevator(currentLevel, direction)
+          callNearestVacantElevator(randomCaller!.currentLevel, direction)
         }
       })
 
@@ -489,21 +527,22 @@ const App: Component = () => {
       setMainView("callerStatus", CallerStatus.inside)
 
       cb(mainView)
-      // TODO: 开门策略
     })
   }
   function getOutElevator() {
-    const { cb } = mainView.whenOpenDoorCallerActionList[0]
-    setMainView("whenOpenDoorCallerActionList", [])
-    setMainView("callerStatus", CallerStatus.inside)
+    batch(() => {
+      const { cb } = mainView.whenOpenDoorCallerActionList[0]
+      setMainView("whenOpenDoorCallerActionList", [])
+      setMainView("callerStatus", CallerStatus.outside)
 
-    cb(mainView)
+      cb(mainView)
 
-    setBuilding(
-      building.findIndex(({ level }) => level === mainView.currentLevel),
-      "queue",
-      (queue) => [...queue, mainView]
-    )
+      setBuilding(
+        building.findIndex(({ level }) => level === mainView.currentLevel),
+        "queue",
+        (queue) => [...queue, mainView]
+      )
+    })
   }
 
   return (
@@ -534,7 +573,7 @@ const App: Component = () => {
                       const elevator = createMemo(
                         () => elevators.find((e) => e.id === id)!
                       )
-                      const isShowGetInBtn = createMemo(() =>
+                      const isOpenDoor = createMemo(() =>
                         Boolean(
                           (mainView.callerStatus === CallerStatus.outside &&
                             item().level === personCurrentLevel() &&
@@ -620,11 +659,14 @@ const App: Component = () => {
                           </div>
 
                           <div class="border border-[#b0b7c5] w-full h-190px flex justify-center relative">
-                            {isShowGetInBtn() && (
+                            {isOpenDoor() && (
                               <GetInButton
+                                callerStatus={mainView.callerStatus}
                                 isClose={buildingElevator().translateX[0] === 0}
                                 emitGetInElevator={() =>
-                                  getInElevator(elevator().id)
+                                  mainView.callerStatus === CallerStatus.inside
+                                    ? getOutElevator()
+                                    : getInElevator(elevator().id)
                                 }
                               />
                             )}
@@ -664,7 +706,6 @@ const App: Component = () => {
             </li>
           </ul>
           <ul class="flex">{/* <Index each={}></Index> */}</ul>
-          <div>{<button onClick={() => getOutElevator()}>出门</button>}</div>
           <div></div>
         </div>
       </div>

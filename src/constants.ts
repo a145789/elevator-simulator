@@ -51,6 +51,8 @@ export const LIGHT_COLOR = [
   LightColor.green,
 ] as const
 
+type CallerAction = (caller: Caller) => boolean
+
 export interface Caller {
   flag: number
   currentLevel: number
@@ -59,14 +61,25 @@ export interface Caller {
   /** 同一楼层可能会有多部电梯开门，使用一个数组保存所有回调 */
   whenOpenDoorCallerActionList: {
     elevatorId: number
-    cb: (caller: Caller) => void
+    cb: CallerAction
   }[]
+  handleTargetLevel: ((level: number) => void) | null
   /** 电梯开门会调用此方法 */
   onOpen: (
     elevatorId: number,
     /** 乘客选择进出门的回调 */
-    callerAction: (caller: Caller) => void
+    callerAction: CallerAction
   ) => void
+  /** 开门期间 */
+  onDuringOpen?: (
+    elevatorId: number,
+    /** 乘客选择进出门的回调 */
+    callerAction: CallerAction
+  ) => void
+  /** 电梯关门，将会给予乘客操作电梯目标楼层的按钮回调 */
+  onClose: (callerAction: (level: number) => void) => void
+  onBeforeRunning?: (elevatorId: number) => void
+  onRunning?: (elevator: Elevator) => void
 }
 export interface Elevator<Scheduling = any> {
   id: number

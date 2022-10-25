@@ -64,6 +64,8 @@ export interface Caller {
     cb: CallerAction
   }[]
   handleTargetLevel: ((level: number) => void) | null
+  /** 乘客进入，将会给予乘客操作电梯目标楼层的按钮回调 */
+  getHandleTargetLevel: (callerAction: (level: number) => void) => void
   /** 电梯开门会调用此方法 */
   onOpen: (
     elevatorId: number,
@@ -76,8 +78,6 @@ export interface Caller {
     /** 乘客选择进出门的回调 */
     callerAction: CallerAction
   ) => void
-  /** 电梯关门，将会给予乘客操作电梯目标楼层的按钮回调 */
-  onClose: (callerAction: (level: number) => void) => void
   onBeforeRunning?: (elevatorId: number) => void
   onRunning?: (elevator: Elevator) => void
 }
@@ -148,15 +148,16 @@ export function getSameDirectionNotNeedElevator(
   level: number
 ) {
   let notHaveTask = false
+  const index = building.findIndex((item) => item.level === level)
   switch (direction) {
     case Direction.down:
       notHaveTask = !building
-        .slice(MAX_FLOOR_NUM - level + 1, MAX_FLOOR_NUM)
+        .slice(index + 1, MAX_FLOOR_NUM)
         .some((item) => item.direction.length)
       break
     case Direction.up:
       notHaveTask = !building
-        .slice(0, MAX_FLOOR_NUM - level)
+        .slice(0, index)
         .some((item) => item.direction.length)
       break
     default:

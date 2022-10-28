@@ -130,18 +130,18 @@ export function getIsHaveSameDirectionSpareElevator(
       return false
     }
 
-    switch (e.direction) {
+    switch (direction) {
       case Direction.down:
-        return e.currentLevel > level
-      case Direction.up:
         return e.currentLevel < level
+      case Direction.up:
+        return e.currentLevel > level
       default:
         return true
     }
   })
 }
 
-/** 获取同方向下的是否还有楼层需要电梯 */
+/** 同方向下的楼层不需要电梯 */
 export function getSameDirectionNotNeedElevator(
   building: Building[],
   direction: Direction,

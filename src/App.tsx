@@ -55,11 +55,10 @@ const App: Component = () => {
     flag: flag++,
     currentLevel: 1,
     callerStatus: CallerStatus.outside,
-    // TODO: onDuringOpen 状态下应该主动索求 callerAction
     whenOpenDoorCallerActionList: [],
     handleTargetLevel: null,
     getHandleTargetLevel(callerAction) {
-      setMainView("handleTargetLevel", callerAction)
+      setMainView("handleTargetLevel", () => callerAction)
     },
     onOpen(elevatorId, callerAction) {
       setMainView("whenOpenDoorCallerActionList", (list) => [
@@ -93,7 +92,19 @@ const App: Component = () => {
     },
   })
 
-  const personCurrentLevel = createMemo(() => mainView.currentLevel)
+  const handelTargetLevelBtn = createMemo(() => {
+    const targetLevelList = elevators.find((e) =>
+      e.queue.some((item) => item.flag === mainView.flag)
+    )?.targetLevelList
+    if (!targetLevelList) {
+      return []
+    } else {
+      return Array.from({ length: MAX_FLOOR_NUM }).map((_, index) => ({
+        level: MAX_FLOOR_NUM - index,
+        isTargetLevel: targetLevelList.includes(MAX_FLOOR_NUM - index),
+      }))
+    }
+  })
 
   let buildingElm: HTMLDivElement | undefined
   onMount(() => {
@@ -101,7 +112,7 @@ const App: Component = () => {
     setTimeout(() => {
       buildingElm!.scrollTop = buildingElm!.scrollHeight
       setBuilding(
-        building.findIndex((item) => item.level === personCurrentLevel()),
+        building.findIndex((item) => item.level === mainView.currentLevel),
         "queue",
         (queue) => [...queue, mainView]
       )
@@ -223,14 +234,24 @@ const App: Component = () => {
       return true
     }
     private handleTargetLevel(level: number) {
-      if (!this.elevator.targetLevelList.includes(level)) {
+      if (
+        !this.elevator.targetLevelList.includes(level) &&
+        level !== this.elevator.currentLevel
+      ) {
         this.elevator.targetLevelList.push(level)
+
+        if (this.elevator.elevatorStatus === ElevatorStatus.pending) {
+          this.run()
+        }
       }
     }
 
     private openDoorTimer: number | null = null
     private openDoorWaitingTimer: number | null = null
     public openDoor() {
+      if (this.elevator.elevatorStatus === ElevatorStatus.running) {
+        return
+      }
       // 正在开门中不执行
       if (this.openDoorTimer !== null) {
         return
@@ -243,7 +264,7 @@ const App: Component = () => {
       this.openFlag = true
 
       // 延时更新
-      Promise.resolve().then(() => {
+      setTimeout(() => {
         updatePureBuildingTranslateX(this.elevator, [-91, 91])
       })
 
@@ -261,6 +282,9 @@ const App: Component = () => {
     private closeDoorTimer: number | null = null
     private waitAssignTimer: number | null = null
     public closeDoor() {
+      if (this.elevator.elevatorStatus === ElevatorStatus.running) {
+        return
+      }
       if (this.closeDoorTimer !== null) {
         return
       }
@@ -287,191 +311,255 @@ const App: Component = () => {
     }
 
     private toNextFloor() {
-      batch(() => {
-        // 如果电梯跑完此方向所有目标楼层，此方向也没有需要要电梯或已有去往此方向的电梯
-        if (
-          !this.elevator.targetLevelList.some((level) =>
-            this.elevator.direction === Direction.up
-              ? level > this.elevator.currentLevel
-              : level < this.elevator.currentLevel
-          ) &&
-          (getIsHaveSameDirectionSpareElevator(
-            elevators,
+      if (this.openFlag) {
+        return
+      }
+      // 如果电梯跑完此方向所有目标楼层，此方向也没有需要要电梯或已有去往此方向的电梯
+      if (
+        !this.elevator.targetLevelList.some((level) =>
+          this.elevator.direction === Direction.up
+            ? level > this.elevator.currentLevel
+            : level < this.elevator.currentLevel
+        ) &&
+        (getIsHaveSameDirectionSpareElevator(
+          elevators,
+          this.elevator.direction,
+          this.elevator.currentLevel
+        ) ||
+          getSameDirectionNotNeedElevator(
+            building,
             this.elevator.direction,
             this.elevator.currentLevel
-          ) ||
-            getSameDirectionNotNeedElevator(
-              building,
-              this.elevator.direction,
-              this.elevator.currentLevel
-            ))
-        ) {
-          // 处理电梯内部相反方向的乘客
-          if (this.elevator.targetLevelList.length) {
-            this.elevator.direction =
-              this.elevator.direction === Direction.up
-                ? Direction.down
-                : Direction.up
-          } else {
-            // 恢复为等待状态
-            this.elevator.direction = Direction.stop
-            this.elevator.elevatorStatus = ElevatorStatus.pending
-            // TODO: 开启一个查询，查找是否还有需要电梯的楼层 每次run时都应该有此状态
-            // 查找一下是否还有楼层需要电梯，条件：
-            // 没有电梯驶向此楼层
-            // 有去往该楼层的电梯但是人员已满
-            return
+          ))
+      ) {
+        // 处理电梯内部相反方向的乘客
+        if (this.elevator.targetLevelList.length) {
+          this.elevator.direction =
+            this.elevator.direction === Direction.up
+              ? Direction.down
+              : Direction.up
+
+          this.elevator.elevatorStatus = ElevatorStatus.running
+          this.elevator.scheduling!.run()
+        } else {
+          // 恢复为等待状态
+          this.elevator.direction = Direction.stop
+          this.elevator.elevatorStatus = ElevatorStatus.pending
+          // 开启一个查询，查找是否还有需要电梯的楼层
+          callVacantElevator()
+        }
+        return
+      }
+
+      this.elevator.elevatorStatus = ElevatorStatus.running
+
+      for (const caller of [
+        ...this.elevator.queue,
+        ...building.find((item) => item.level === this.elevator.currentLevel)!
+          .queue,
+      ]) {
+        caller.onBeforeRunning?.(this.elevator.id)
+      }
+
+      setTimeout(() => {
+        batch(() => {
+          const level =
+            this.elevator.direction === Direction.up
+              ? this.elevator.currentLevel + 1
+              : this.elevator.currentLevel - 1
+
+          if (level > 0 && level < 25) {
+            this.elevator.currentLevel = level
           }
-        }
 
-        this.elevator.elevatorStatus = ElevatorStatus.running
-
-        for (const caller of [
-          ...this.elevator.queue,
-          ...building.find((item) => item.level === this.elevator.currentLevel)!
-            .queue,
-        ]) {
-          caller.onBeforeRunning?.(this.elevator.id)
-        }
-
-        setTimeout(() => {
-          batch(() => {
-            const level =
-              this.elevator.direction === Direction.up
-                ? this.elevator.currentLevel + 1
-                : this.elevator.currentLevel - 1
-
-            if (level > 0 && level < 25) {
-              this.elevator.currentLevel = level
-            }
-
-            for (const caller of [...this.elevator.queue]) {
-              caller.onRunning?.(this.elevator)
-            }
-            this.run()
-          })
-          isRunScrollAnimation = false
-        }, ELEVATOR_THROUGH_FLOOR_TIME)
-      })
+          for (const caller of [...this.elevator.queue]) {
+            caller.onRunning?.(this.elevator)
+          }
+          this.run()
+          callVacantElevator()
+        })
+        isRunScrollAnimation = false
+      }, ELEVATOR_THROUGH_FLOOR_TIME)
     }
 
     public run() {
-      batch(() => {
-        const currentBuildIndex = building.findIndex(
-          (item) => item.level === this.elevator.currentLevel
+      const currentBuildIndex = building.findIndex(
+        (item) => item.level === this.elevator.currentLevel
+      )
+      const floor = building[currentBuildIndex]
+
+      // 符合电梯的目标楼层
+      if (this.elevator.targetLevelList.includes(this.elevator.currentLevel)) {
+        this.elevator.elevatorStatus = ElevatorStatus.open
+        this.openDoor()
+
+        this.elevator.targetLevelList.splice(
+          this.elevator.targetLevelList.indexOf(this.elevator.currentLevel),
+          1
         )
-        const floor = building[currentBuildIndex]
+      }
 
-        // 符合电梯的目标楼层
-        if (
-          this.elevator.targetLevelList.includes(this.elevator.currentLevel)
-        ) {
-          this.elevator.elevatorStatus = ElevatorStatus.open
+      // 搭乘同方向的乘客
+      if (floor.direction.includes(this.elevator.direction)) {
+        this.elevator.elevatorStatus = ElevatorStatus.open
+        if (!this.openFlag) {
           this.openDoor()
-
-          this.elevator.targetLevelList.splice(
-            this.elevator.targetLevelList.indexOf(this.elevator.currentLevel),
-            1
-          )
-
-          // 通知所有在电梯内的乘客是否需要出电梯
-          for (const caller of [...this.elevator.queue]) {
-            caller.onOpen(this.elevator.id, this.callerGetOutAction.bind(this))
-          }
         }
 
-        // 搭乘同方向的乘客
-        if (floor.direction.includes(this.elevator.direction)) {
-          this.elevator.elevatorStatus = ElevatorStatus.open
-          if (!this.openFlag) {
-            this.openDoor()
-          }
+        setBuilding(currentBuildIndex, "direction", (d) => {
+          d.splice(d.indexOf(this.elevator.direction), 1)
+          return [...d]
+        })
+      }
 
-          setBuilding(currentBuildIndex, "direction", (d) => {
-            d.splice(d.indexOf(this.elevator.direction), 1)
-            return [...d]
-          })
-
-          // 通知此楼乘客是否上电梯
-          for (const caller of [...floor.queue]) {
-            caller.onOpen(this.elevator.id, this.callerGetInAction.bind(this))
-          }
-        }
-
-        // 此楼层想要去往的方向与电梯方向不同
-        // 但电梯内无乘客，此方向也无需要使用电梯的乘客或者有其他电梯驶向此方向
-        if (
-          floor.direction.length &&
-          !this.elevator.targetLevelList.length &&
-          (getIsHaveSameDirectionSpareElevator(
-            elevators,
+      if (
+        floor.direction.length &&
+        !this.elevator.targetLevelList.length &&
+        (getIsHaveSameDirectionSpareElevator(
+          elevators,
+          this.elevator.direction,
+          this.elevator.currentLevel
+        ) ||
+          getSameDirectionNotNeedElevator(
+            building,
             this.elevator.direction,
             this.elevator.currentLevel
-          ) ||
-            getSameDirectionNotNeedElevator(
-              building,
-              this.elevator.direction,
-              this.elevator.currentLevel
-            ))
-        ) {
-          this.elevator.elevatorStatus = ElevatorStatus.open
-          if (!this.openFlag) {
-            this.openDoor()
-          }
-
-          this.elevator.direction = floor.direction[0]
-          setBuilding(currentBuildIndex, "direction", () => [])
-          // 通知此楼乘客是否上电梯
-          for (const caller of [...floor.queue]) {
-            caller.onOpen(this.elevator.id, this.callerGetInAction.bind(this))
-          }
+          ))
+      ) {
+        // 此楼层想要去往的方向与电梯方向不同
+        // 但电梯内无乘客，此方向也无需要使用电梯的乘客或者有其他电梯驶向此方向
+        this.elevator.elevatorStatus = ElevatorStatus.open
+        if (!this.openFlag) {
+          this.openDoor()
         }
 
+        this.elevator.direction = floor.direction[0]
+        setBuilding(currentBuildIndex, "direction", () => [])
+      }
+
+      if (this.elevator.elevatorStatus === ElevatorStatus.open) {
+        // 通知所有在电梯内的乘客是否需要出电梯
+        for (const caller of [...this.elevator.queue]) {
+          caller.onOpen(this.elevator.id, this.callerGetOutAction.bind(this))
+        }
+
+        // 通知门外的是否有意愿上电梯
+        for (const caller of [...floor.queue]) {
+          caller.onOpen(this.elevator.id, this.callerGetInAction.bind(this))
+        }
+      } else {
         // 此楼不需要电梯停止
-        if (this.elevator.elevatorStatus !== ElevatorStatus.open) {
-          this.elevator.elevatorStatus = ElevatorStatus.running
-          this.toNextFloor()
+        this.elevator.elevatorStatus = ElevatorStatus.running
+        this.toNextFloor()
+      }
+    }
+
+    public getCallerGetInAction() {
+      if (!this.openFlag) {
+        return
+      }
+
+      return this.callerGetInAction.bind(this)
+    }
+  }
+
+  // 查找一下是否还有楼层需要电梯，条件：
+  // 没有电梯驶向此楼层
+  // 有去往该楼层的电梯但是人员已满
+  function callVacantElevator() {
+    for (const vacantElevator of elevators) {
+      if (vacantElevator.direction !== Direction.stop) {
+        continue
+      }
+      const { currentLevel } = vacantElevator
+      let di = currentLevel - 1
+      let ui = currentLevel + 1
+      while (di > 0 || ui <= MAX_FLOOR_NUM) {
+        const dFloor = building.find((item) => item.level === di)!
+        if (
+          di > 0 &&
+          dFloor.direction.length &&
+          elevators.every(
+            (e) =>
+              e.queue.length === MAX_LOAD_LIMIT ||
+              (dFloor.direction.includes(Direction.up) &&
+                e.direction === Direction.up &&
+                e.currentLevel > di) ||
+              (dFloor.direction.includes(Direction.down) &&
+                e.direction === Direction.down &&
+                e.currentLevel < di)
+          )
+        ) {
+          elevatorRun(vacantElevator, di, Direction.down)
+          break
         }
-      })
+
+        const uFloor = building.find((item) => item.level === ui)!
+        if (
+          ui <= MAX_FLOOR_NUM &&
+          uFloor.direction.length &&
+          elevators.every(
+            (e) =>
+              e.queue.length === MAX_LOAD_LIMIT ||
+              (uFloor.direction.includes(Direction.up) &&
+                e.direction === Direction.up &&
+                e.currentLevel > ui) ||
+              (uFloor.direction.includes(Direction.down) &&
+                e.direction === Direction.down &&
+                e.currentLevel < ui)
+          )
+        ) {
+          elevatorRun(vacantElevator, ui, Direction.up)
+          break
+        }
+
+        di -= 1
+        ui += 1
+      }
     }
   }
 
   function callNearestVacantElevator(level: number, direction: Direction) {
-    batch(() => {
-      updateBuildingDirection(level, direction, "add")
+    updateBuildingDirection(level, direction, "add")
 
-      if (getIsHaveSameDirectionSpareElevator(elevators, direction, level)) {
-        return
-      }
+    if (getIsHaveSameDirectionSpareElevator(elevators, direction, level)) {
+      return
+    }
 
-      // 没有空闲的电梯
-      const vacantElevators = elevators.filter(
-        ({ direction }) => direction === Direction.stop
-      )
-      if (!vacantElevators.length) {
-        return
-      }
+    // 没有空闲的电梯
+    const vacantElevators = elevators.filter(
+      ({ direction }) => direction === Direction.stop
+    )
+    if (!vacantElevators.length) {
+      return
+    }
 
-      // 找到最近的空置电梯
-      const elevator = vacantElevators.reduce((p, c) =>
-        c.elevatorStatus !== ElevatorStatus.pending ||
-        (p.elevatorStatus === ElevatorStatus.pending &&
-          Math.abs(p.currentLevel - level) < Math.abs(c.currentLevel - level))
-          ? p
-          : c
-      )
+    // 找到最近的空置电梯
+    const elevator = vacantElevators.reduce((p, c) =>
+      c.elevatorStatus !== ElevatorStatus.pending ||
+      (p.elevatorStatus === ElevatorStatus.pending &&
+        Math.abs(p.currentLevel - level) < Math.abs(c.currentLevel - level))
+        ? p
+        : c
+    )
+    elevatorRun(elevator, level, direction)
+  }
 
-      if (elevator.currentLevel === level) {
-        elevator.direction = direction
-        elevator.elevatorStatus = ElevatorStatus.open
-      } else {
-        elevator.direction =
-          elevator.currentLevel > level ? Direction.down : Direction.up
-        elevator.elevatorStatus = ElevatorStatus.running
-      }
+  function elevatorRun(
+    elevator: Elevator<Scheduling>,
+    level: number,
+    direction: Direction
+  ) {
+    if (elevator.currentLevel === level) {
+      elevator.direction = direction
+      elevator.elevatorStatus = ElevatorStatus.open
+    } else {
+      elevator.direction =
+        elevator.currentLevel > level ? Direction.down : Direction.up
+      elevator.elevatorStatus = ElevatorStatus.running
+    }
 
-      elevator.scheduling!.run()
-    })
+    elevator.scheduling!.run()
   }
 
   let randomCallingTimer: number
@@ -498,10 +586,17 @@ const App: Component = () => {
           whenOpenDoorCallerActionList: [],
           handleTargetLevel: null,
           getHandleTargetLevel(callerAction) {
+            if (
+              randomCaller!.currentLevel === 1 ||
+              randomCaller!.currentLevel === MAX_FLOOR_NUM
+            ) {
+              targetLevel = random(MAX_FLOOR_NUM - 1, 2)
+            }
             targetLevel =
               direction === Direction.up
-                ? random(MAX_FLOOR_NUM, randomCaller!.currentLevel)
-                : random(randomCaller!.currentLevel, 1)
+                ? random(MAX_FLOOR_NUM, randomCaller!.currentLevel + 1)
+                : random(randomCaller!.currentLevel - 1, 1)
+
             callerAction(targetLevel!)
           },
           onOpen(elevatorId, callerAction) {
@@ -539,13 +634,15 @@ const App: Component = () => {
                     )
                     // 设定一个定时器随机几秒后再上下楼
                     setTimeout(() => {
-                      const direction =
-                        random(1) < 1 ? Direction.down : Direction.up
+                      batch(() => {
+                        const direction =
+                          random(1) < 1 ? Direction.down : Direction.up
 
-                      callNearestVacantElevator(
-                        randomCaller!.currentLevel,
-                        direction
-                      )
+                        callNearestVacantElevator(
+                          randomCaller!.currentLevel,
+                          direction
+                        )
+                      })
                     }, random(6000))
                   } else {
                     randomCaller = null
@@ -579,8 +676,9 @@ const App: Component = () => {
     if (mainView.callerStatus === CallerStatus.inside) {
       return
     }
-
-    callNearestVacantElevator(mainView.currentLevel, direction)
+    batch(() => {
+      callNearestVacantElevator(mainView.currentLevel, direction)
+    })
   }
   function getInElevator(elevatorId: number) {
     batch(() => {
@@ -617,8 +715,41 @@ const App: Component = () => {
           "queue",
           (queue) => [...queue, mainView]
         )
+        if (mainView.callerStatus === CallerStatus.outside) {
+          for (const e of elevators.filter(
+            (item) =>
+              item.currentLevel === mainView.currentLevel &&
+              !mainView.whenOpenDoorCallerActionList.some(
+                ({ elevatorId }) => elevatorId === item.id
+              )
+          )) {
+            const action = e.scheduling!.getCallerGetInAction()
+            if (action) {
+              setMainView("whenOpenDoorCallerActionList", (list) => [
+                ...list,
+                {
+                  elevatorId,
+                  cb: action,
+                },
+              ])
+            }
+          }
+        }
       }
     })
+  }
+  function handelTargetLevel(level: number) {
+    mainView.handleTargetLevel!(level)
+  }
+  function personHandleDoor(type: "open" | "close") {
+    const elevator = elevators.find((e) =>
+      e.queue.some((c) => c.flag === mainView.flag)
+    )!
+    if (type === "open") {
+      elevator.scheduling!.openDoor()
+    } else {
+      elevator.scheduling!.closeDoor()
+    }
   }
 
   return (
@@ -651,13 +782,14 @@ const App: Component = () => {
                       )
                       const isOpenDoor = createMemo(() =>
                         Boolean(
-                          (mainView.callerStatus === CallerStatus.outside &&
-                            item().level === personCurrentLevel() &&
-                            elevator().currentLevel === personCurrentLevel()) ||
-                            (mainView.callerStatus === CallerStatus.inside &&
-                              elevator().queue.some(
-                                (item) => item.flag === mainView.flag
-                              ))
+                          item().level === mainView.currentLevel &&
+                            ((mainView.callerStatus === CallerStatus.outside &&
+                              elevator().currentLevel ===
+                                mainView.currentLevel) ||
+                              (mainView.callerStatus === CallerStatus.inside &&
+                                elevator().queue.some(
+                                  (item) => item.flag === mainView.flag
+                                )))
                         )
                       )
 
@@ -772,17 +904,39 @@ const App: Component = () => {
 
         <div class="ml-42px">
           <h2>Operation Panel</h2>
-          <ul>
-            <li>current floor: {personCurrentLevel()}</li>
-            <li>
-              <button onClick={() => personCalling(Direction.up)}>up</button>
-              <button onClick={() => personCalling(Direction.down)}>
-                down
-              </button>
-            </li>
-          </ul>
-          <ul class="flex">{/* <Index each={}></Index> */}</ul>
-          <div></div>
+          <div>
+            <div>current floor: {mainView.currentLevel}</div>
+            {mainView.callerStatus === CallerStatus.outside ? (
+              <div>
+                <button onClick={() => personCalling(Direction.up)}>up</button>
+                <button onClick={() => personCalling(Direction.down)}>
+                  down
+                </button>
+              </div>
+            ) : (
+              <>
+                <ul class="w-200px flex flex-wrap">
+                  <Index each={handelTargetLevelBtn()}>
+                    {(item) => (
+                      <li
+                        class="m-3px"
+                        classList={{
+                          "bg-#333": item().isTargetLevel,
+                        }}
+                        onClick={() => handelTargetLevel(item().level)}
+                      >
+                        {item().level}
+                      </li>
+                    )}
+                  </Index>
+                </ul>
+                <div>
+                  <button onClick={() => personHandleDoor("open")}>开</button>
+                  <button onClick={() => personHandleDoor("close")}>关</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

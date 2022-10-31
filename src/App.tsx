@@ -1,6 +1,6 @@
 import { batch, Component, createMemo, Index, onMount } from "solid-js"
 import { createMutable, createStore } from "solid-js/store"
-import GetInButton from "./components/GetInButton"
+import GetInAndOutButton from "./components/GetInAndOutButton"
 import LedNumber from "./components/LedNumber"
 import {
   Building,
@@ -26,7 +26,6 @@ import {
 } from "./constants"
 
 let flag = 0
-let timern = Date.now()
 
 const genElevator = () =>
   Array.from({ length: MAX_ELEVATOR_NUM }).map<Elevator>((_, index) => ({
@@ -179,6 +178,7 @@ const App: Component = () => {
       return
     }
 
+    // TODO: 运行卡顿
     let start: number | null = null
     let scrollTop = buildingElm.scrollTop
     const gap = Math.ceil(ELEVATOR_THROUGH_FLOOR_TIME / 300)
@@ -194,7 +194,6 @@ const App: Component = () => {
       }
 
       if (elapsed < ELEVATOR_THROUGH_FLOOR_TIME) {
-        // 在两秒后停止动画
         requestAnimationFrame(step)
       } else {
         if (direction === Direction.up) {
@@ -548,6 +547,7 @@ const App: Component = () => {
   function callNearestVacantElevator(level: number, direction: Direction) {
     updateBuildingDirection(level, direction, "add")
 
+    // TODO: 判断有问题
     // 空闲的电梯
     const vacantElevators = elevators.filter(
       ({ direction, queue }) =>
@@ -613,7 +613,7 @@ const App: Component = () => {
       default:
         break
     }
-    
+
     // 启用空闲电梯
     // 找到最近的空置电梯
     const elevator = vacantElevators.reduce((p, c) =>
@@ -951,7 +951,7 @@ const App: Component = () => {
 
                           <div class="border border-[#b0b7c5] w-full h-190px flex justify-center relative">
                             {isOpenDoor() && (
-                              <GetInButton
+                              <GetInAndOutButton
                                 callerStatus={mainView.callerStatus}
                                 isClose={buildingElevator().translateX[0] === 0}
                                 emitGetInElevator={() =>

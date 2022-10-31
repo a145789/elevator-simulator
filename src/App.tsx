@@ -26,11 +26,12 @@ import {
 } from "./constants"
 
 let flag = 0
+let timern = Date.now()
 
 const genElevator = () =>
   Array.from({ length: MAX_ELEVATOR_NUM }).map<Elevator>((_, index) => ({
     id: index,
-    currentLevel: random(24, 1),
+    currentLevel: random(MAX_FLOOR_NUM, 1),
     elevatorStatus: ElevatorStatus.pending,
     direction: Direction.stop,
     targetLevelList: [],
@@ -86,6 +87,12 @@ const App: Component = () => {
     },
     onBeforeRunning() {
       setMainView("whenOpenDoorCallerActionList", [])
+      if (mainView.callerStatus === CallerStatus.inside) {
+        moveScroll(
+          elevators.find((e) => e.queue.some((c) => c.flag === mainView.flag))!
+            .direction
+        )
+      }
     },
     onRunning(elevator) {
       setMainView("currentLevel", elevator.currentLevel)
@@ -121,13 +128,13 @@ const App: Component = () => {
         item.scheduling = new Scheduling(item)
       })
 
-      randomCalling()
+      // randomCalling()
     })
   })
 
   function updatePureBuildingTranslateX(
     elevator: Elevator,
-    translateX: [number, number]
+    translateX: [0, 0] | [-90, 90]
   ) {
     const { id, currentLevel } = elevator
 
@@ -160,27 +167,45 @@ const App: Component = () => {
     }
   }
 
-  let isRunScrollAnimation = true
   function moveScroll(direction: Direction) {
-    isRunScrollAnimation = true
     if (!buildingElm) {
       return
     }
     if (
-      (direction === Direction.up && buildingElm.scrollTop === 0) ||
+      (direction === Direction.up && buildingElm.scrollTop - 300 <= 0) ||
       (direction === Direction.down &&
-        buildingElm.scrollTop === buildingElm.scrollHeight)
+        buildingElm.scrollTop + 300 >= buildingElm.scrollHeight)
     ) {
       return
     }
-    function cb() {
-      if (!isRunScrollAnimation) {
-        return
+
+    let start: number | null = null
+    let scrollTop = buildingElm.scrollTop
+    const gap = Math.ceil(ELEVATOR_THROUGH_FLOOR_TIME / 300)
+    function step(timestamp: number) {
+      // timestamp回调函数传入的`DOMHighResTimeStamp`参数，也就是存储毫秒级的时间值
+      if (start === null) start = timestamp
+      const elapsed = timestamp - start
+
+      if (direction === Direction.up) {
+        buildingElm!.scrollTop = buildingElm!.scrollTop - gap + 1
+      } else {
+        buildingElm!.scrollTop = buildingElm!.scrollTop + gap - 1
       }
-      buildingElm!.scrollTop = buildingElm!.scrollTop - 10
-      requestAnimationFrame(cb)
+
+      if (elapsed < ELEVATOR_THROUGH_FLOOR_TIME) {
+        // 在两秒后停止动画
+        requestAnimationFrame(step)
+      } else {
+        if (direction === Direction.up) {
+          buildingElm!.scrollTop = scrollTop - 300
+        } else {
+          buildingElm!.scrollTop = scrollTop + 300
+        }
+      }
     }
-    requestAnimationFrame(cb)
+
+    requestAnimationFrame(step)
   }
 
   /**
@@ -265,7 +290,7 @@ const App: Component = () => {
 
       // 延时更新
       setTimeout(() => {
-        updatePureBuildingTranslateX(this.elevator, [-91, 91])
+        updatePureBuildingTranslateX(this.elevator, [-90, 90])
       })
 
       if (this.openDoorWaitingTimer !== null) {
@@ -322,6 +347,7 @@ const App: Component = () => {
             : level < this.elevator.currentLevel
         ) &&
         (getIsHaveSameDirectionSpareElevator(
+          this.elevator.id,
           elevators,
           this.elevator.direction,
           this.elevator.currentLevel
@@ -378,7 +404,6 @@ const App: Component = () => {
           this.run()
           callVacantElevator()
         })
-        isRunScrollAnimation = false
       }, ELEVATOR_THROUGH_FLOOR_TIME)
     }
 
@@ -416,6 +441,7 @@ const App: Component = () => {
         floor.direction.length &&
         !this.elevator.targetLevelList.length &&
         (getIsHaveSameDirectionSpareElevator(
+          this.elevator.id,
           elevators,
           this.elevator.direction,
           this.elevator.currentLevel
@@ -522,18 +548,73 @@ const App: Component = () => {
   function callNearestVacantElevator(level: number, direction: Direction) {
     updateBuildingDirection(level, direction, "add")
 
-    if (getIsHaveSameDirectionSpareElevator(elevators, direction, level)) {
-      return
-    }
-
-    // 没有空闲的电梯
+    // 空闲的电梯
     const vacantElevators = elevators.filter(
-      ({ direction }) => direction === Direction.stop
+      ({ direction, queue }) =>
+        direction === Direction.stop && queue.length < MAX_LOAD_LIMIT
     )
-    if (!vacantElevators.length) {
-      return
-    }
+    // 同方向前来的电梯
+    const sameDirElevator = elevators.filter((e) => {
+      if (
+        e.currentLevel === level &&
+        e.elevatorStatus !== ElevatorStatus.running
+      ) {
+        return true
+      }
+      if (e.direction === Direction.stop || e.queue.length === MAX_LOAD_LIMIT) {
+        return false
+      }
+      if (e.direction === direction || !e.targetLevelList.length) {
+        switch (direction) {
+          case Direction.down:
+            return e.currentLevel > level
+          case Direction.up:
+            return e.currentLevel < level
+          default:
+            return true
+        }
+      }
 
+      return false
+    })
+
+    // 是否有电梯前来并且比空闲电梯来的快
+    switch (direction) {
+      case Direction.up:
+        if (
+          Math.max.apply(
+            null,
+            sameDirElevator.map((item) => item.currentLevel)
+          ) >
+          Math.max.apply(
+            null,
+            vacantElevators.map((item) => item.currentLevel)
+          )
+        ) {
+          return
+        }
+        break
+      case Direction.down:
+        if (!vacantElevators.length) {
+          return
+        }
+        if (
+          sameDirElevator.length &&
+          Math.min.apply(sameDirElevator.map((item) => item.currentLevel)) <
+            Math.min.apply(
+              null,
+              vacantElevators.map((item) => item.currentLevel)
+            )
+        ) {
+          return
+        }
+        break
+
+      default:
+        break
+    }
+    
+    // 启用空闲电梯
     // 找到最近的空置电梯
     const elevator = vacantElevators.reduce((p, c) =>
       c.elevatorStatus !== ElevatorStatus.pending ||
@@ -581,7 +662,7 @@ const App: Component = () => {
 
         let randomCaller: Caller | null = {
           flag: flag++,
-          currentLevel: random(24, 1),
+          currentLevel: random(MAX_FLOOR_NUM, 1),
           callerStatus: CallerStatus.outside,
           whenOpenDoorCallerActionList: [],
           handleTargetLevel: null,
@@ -753,11 +834,11 @@ const App: Component = () => {
   }
 
   return (
-    <div class="w-full h-full flex justify-center items-center py-20px box-border">
+    <div class="w-full h-full flex justify-center items-center py-20px">
       <div class="flex items-center h-full">
         <div
           class="border-y-1px border-[#c0c0c0] h-full overflow-y-hidden"
-          ref={buildingElm}
+          ref={(el) => (buildingElm = el)}
         >
           <Index each={building}>
             {(item, index) => {
@@ -769,9 +850,9 @@ const App: Component = () => {
                     "border-b-1px": index + 1 !== building.length,
                   }}
                 >
-                  <div>
-                    <div class="w-24px">{floor.level}</div>
-                    <div>人数：{item().queue.length}</div>
+                  <div class="w-100px">
+                    <div class="mb-6px">{floor.level}楼</div>
+                    <div>等待人数：{item().queue.length}</div>
                   </div>
 
                   <Index each={item().elevators}>
@@ -794,7 +875,7 @@ const App: Component = () => {
                       )
 
                       return (
-                        <div class="w-220px p-20px box-border flex flex-col items-center">
+                        <div class="w-220px px-20px flex flex-col items-center justify-center">
                           <div class="border border-[#b0b7c5] h-40px w-full flex justify-around items-center">
                             <Index each={LIGHT_COLOR}>
                               {(color) => {
@@ -859,7 +940,9 @@ const App: Component = () => {
                             <div class="w-24px h-24px border text-center">
                               {elevator().direction === Direction.up
                                 ? "up"
-                                : "down"}
+                                : elevator().direction === Direction.down
+                                ? "down"
+                                : "stop"}
                             </div>
                             <div class="w-24px h-24px border text-center">
                               {`${elevator().queue.length}`}
@@ -903,9 +986,9 @@ const App: Component = () => {
         </div>
 
         <div class="ml-42px">
-          <h2>Operation Panel</h2>
+          <h2>操作面板</h2>
           <div>
-            <div>current floor: {mainView.currentLevel}</div>
+            <div>Your Level: {mainView.currentLevel}</div>
             {mainView.callerStatus === CallerStatus.outside ? (
               <div>
                 <button onClick={() => personCalling(Direction.up)}>up</button>

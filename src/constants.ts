@@ -98,7 +98,7 @@ export interface Building {
   direction: Direction[]
   elevators: {
     id: number
-    translateX: [number, number]
+    translateX: [0, 0] | [-90, 90]
   }[]
   queue: Caller[]
 }
@@ -121,24 +121,30 @@ export const random = (max: number, min = 0) => {
 
 /** 是否有同方向在运行，并且搭乘人数没有超过可搭乘最大人数的电梯 */
 export function getIsHaveSameDirectionSpareElevator(
+  currentElevatorId: number,
   elevators: Elevator[],
   direction: Direction,
   level: number
 ) {
-  return elevators.some((e) => {
-    if (e.queue.length >= MAX_LOAD_LIMIT || e.direction !== direction) {
-      return false
-    }
+  return elevators
+    .filter((e) => e.id !== currentElevatorId)
+    .some((e) => {
+      if (
+        e.queue.length === MAX_LOAD_LIMIT ||
+        (e.direction !== Direction.stop && e.direction !== direction)
+      ) {
+        return false
+      }
 
-    switch (direction) {
-      case Direction.down:
-        return e.currentLevel < level
-      case Direction.up:
-        return e.currentLevel > level
-      default:
-        return true
-    }
-  })
+      switch (direction) {
+        case Direction.down:
+          return e.currentLevel < level
+        case Direction.up:
+          return e.currentLevel > level
+        default:
+          return true
+      }
+    })
 }
 
 /** 同方向下的楼层不需要电梯 */

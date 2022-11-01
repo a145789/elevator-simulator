@@ -87,6 +87,7 @@ const App: Component = () => {
     onBeforeRunning() {
       setMainView("whenOpenDoorCallerActionList", [])
       if (mainView.callerStatus === CallerStatus.inside) {
+        isRunScrollAnimationFrame = true
         moveScroll(
           elevators.find((e) => e.queue.some((c) => c.flag === mainView.flag))!
             .direction
@@ -94,6 +95,9 @@ const App: Component = () => {
       }
     },
     onRunning(elevator) {
+      isRunScrollAnimationFrame = false
+      cancelAnimationFrame(ttt)
+      console.log(buildingElm!.scrollTop - scrollTop)
       setMainView("currentLevel", elevator.currentLevel)
     },
   })
@@ -166,6 +170,9 @@ const App: Component = () => {
     }
   }
 
+  let isRunScrollAnimationFrame = false
+  let ttt = 0
+  let scrollTop = buildingElm?.scrollTop || 0
   function moveScroll(direction: Direction) {
     if (!buildingElm) {
       return
@@ -180,31 +187,38 @@ const App: Component = () => {
 
     // TODO: 运行卡顿
     let start: number | null = null
-    let scrollTop = buildingElm.scrollTop
-    const gap = Math.ceil(ELEVATOR_THROUGH_FLOOR_TIME / 300)
+    let timeGap: number | null = null
+    scrollTop = buildingElm.scrollTop
     function step(timestamp: number) {
       // timestamp回调函数传入的`DOMHighResTimeStamp`参数，也就是存储毫秒级的时间值
-      if (start === null) start = timestamp
+      if (start === null || timeGap === null) {
+        start = timestamp
+        timeGap = timestamp
+      }
       const elapsed = timestamp - start
-
+      timeGap = timestamp - timeGap <= 0 ? 0 : timestamp - timeGap
+      const gap =
+        ((300 - scrollTop + buildingElm!.scrollTop) /
+          (ELEVATOR_THROUGH_FLOOR_TIME - elapsed)) *
+        timeGap
       if (direction === Direction.up) {
-        buildingElm!.scrollTop = buildingElm!.scrollTop - gap + 1
+        buildingElm!.scrollTop = buildingElm!.scrollTop - gap
       } else {
-        buildingElm!.scrollTop = buildingElm!.scrollTop + gap - 1
+        buildingElm!.scrollTop = buildingElm!.scrollTop + gap
       }
 
-      if (elapsed < ELEVATOR_THROUGH_FLOOR_TIME) {
-        requestAnimationFrame(step)
-      } else {
-        if (direction === Direction.up) {
-          buildingElm!.scrollTop = scrollTop - 300
-        } else {
-          buildingElm!.scrollTop = scrollTop + 300
-        }
-      }
+      timeGap = timestamp
+
+      ttt = requestAnimationFrame(step)
+
+      // if (direction === Direction.up) {
+      //   buildingElm!.scrollTop = scrollTop - 300
+      // } else {
+      //   buildingElm!.scrollTop = scrollTop + 300
+      // }
     }
 
-    requestAnimationFrame(step)
+    ttt = requestAnimationFrame(step)
   }
 
   /**
@@ -547,16 +561,20 @@ const App: Component = () => {
   function callNearestVacantElevator(level: number, direction: Direction) {
     updateBuildingDirection(level, direction, "add")
 
-    // TODO: 判断有问题
     // 空闲的电梯
     const vacantElevators = elevators.filter(
       ({ direction, queue }) =>
         direction === Direction.stop && queue.length < MAX_LOAD_LIMIT
     )
+    if (!vacantElevators.length) {
+      return
+    }
+
     // 同方向前来的电梯
     const sameDirElevator = elevators.filter((e) => {
       if (
         e.currentLevel === level &&
+        e.direction !== Direction.stop &&
         e.elevatorStatus !== ElevatorStatus.running
       ) {
         return true
@@ -571,47 +589,26 @@ const App: Component = () => {
           case Direction.up:
             return e.currentLevel < level
           default:
-            return true
+            break
         }
       }
 
       return false
     })
 
-    // 是否有电梯前来并且比空闲电梯来的快
-    switch (direction) {
-      case Direction.up:
-        if (
-          Math.max.apply(
-            null,
-            sameDirElevator.map((item) => item.currentLevel)
-          ) >
-          Math.max.apply(
-            null,
-            vacantElevators.map((item) => item.currentLevel)
+    // 如果已有电梯和乘客在同一层或者比空闲电梯更靠近乘客
+    if (
+      sameDirElevator.some(
+        (se) =>
+          se.currentLevel === level ||
+          vacantElevators.every(
+            (ve) =>
+              Math.abs(ve.currentLevel - level) >
+              Math.abs(se.currentLevel - level)
           )
-        ) {
-          return
-        }
-        break
-      case Direction.down:
-        if (!vacantElevators.length) {
-          return
-        }
-        if (
-          sameDirElevator.length &&
-          Math.min.apply(sameDirElevator.map((item) => item.currentLevel)) <
-            Math.min.apply(
-              null,
-              vacantElevators.map((item) => item.currentLevel)
-            )
-        ) {
-          return
-        }
-        break
-
-      default:
-        break
+      )
+    ) {
+      return
     }
 
     // 启用空闲电梯
@@ -672,11 +669,12 @@ const App: Component = () => {
               randomCaller!.currentLevel === MAX_FLOOR_NUM
             ) {
               targetLevel = random(MAX_FLOOR_NUM - 1, 2)
+            } else {
+              targetLevel =
+                direction === Direction.up
+                  ? random(MAX_FLOOR_NUM, randomCaller!.currentLevel + 1)
+                  : random(randomCaller!.currentLevel - 1, 1)
             }
-            targetLevel =
-              direction === Direction.up
-                ? random(MAX_FLOOR_NUM, randomCaller!.currentLevel + 1)
-                : random(randomCaller!.currentLevel - 1, 1)
 
             callerAction(targetLevel!)
           },

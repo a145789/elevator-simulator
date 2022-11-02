@@ -1,6 +1,6 @@
 import { Component, createEffect, createSignal, on } from "solid-js"
+import { USE_COLOR } from "../constants"
 
-const MAIN_COLOR = "#ff2936" as const
 const SECONDARY_COLOR = "rgba(121,8,34,0.4)" as const
 
 const obj = {
@@ -22,13 +22,13 @@ const LedNumber: Component<{
   number: keyof typeof obj | null
 }> = (props) => {
   const [color, setColor] =
-    createSignal<(typeof MAIN_COLOR | typeof SECONDARY_COLOR)[]>(tempArr)
+    createSignal<(typeof USE_COLOR | typeof SECONDARY_COLOR)[]>(tempArr)
 
   createEffect(
     on(
       () => props.number,
       (value) => {
-        const c = color().map<typeof MAIN_COLOR | typeof SECONDARY_COLOR>(
+        const c = color().map<typeof USE_COLOR | typeof SECONDARY_COLOR>(
           () => SECONDARY_COLOR
         )
         if (value === null) {
@@ -36,7 +36,7 @@ const LedNumber: Component<{
           return
         }
         obj[value].forEach((item) => {
-          c[item] = MAIN_COLOR
+          c[item] = USE_COLOR
         })
         setColor(c)
       }

@@ -1,7 +1,16 @@
-import { batch, Component, createMemo, Index, onMount } from "solid-js"
+import {
+  batch,
+  Component,
+  createMemo,
+  createSignal,
+  Index,
+  onMount,
+} from "solid-js"
 import { createMutable, createStore } from "solid-js/store"
 import GetInAndOutButton from "./components/GetInAndOutButton"
 import LedNumber from "./components/LedNumber"
+import Message from "./components/Message"
+import IconSvg from "./components/IconSvg"
 import {
   Building,
   Caller,
@@ -12,6 +21,7 @@ import {
   ElevatorStatus,
   ELEVATOR_THROUGH_FLOOR_TIME,
   ELEVATOR_WAITING_TIME,
+  FLOOR_HEIGHT,
   getIsHaveSameDirectionSpareElevator,
   getSameDirectionNotNeedElevator,
   LightColor,
@@ -22,6 +32,7 @@ import {
   MAX_RANDOM_PERSON_NUM,
   random,
   transformFloorNumber,
+  USE_COLOR,
   WAIT_ASSIGN_FLOOR_TIME,
 } from "./constants"
 
@@ -49,6 +60,8 @@ const genBuilding = () =>
   }))
 
 const App: Component = () => {
+  const [messageVisible, setMessageVisible] = createSignal(false)
+
   const elevators = createMutable<Elevator<Scheduling>[]>(genElevator())
   const [building, setBuilding] = createStore(genBuilding())
   const [mainView, setMainView] = createStore<Caller>({
@@ -84,10 +97,17 @@ const App: Component = () => {
         ]
       })
     },
-    onBeforeRunning() {
-      setMainView("whenOpenDoorCallerActionList", [])
+    onBeforeRunning(elevatorId: number) {
+      setMainView("whenOpenDoorCallerActionList", (list) => {
+        let index = list.findIndex((item) => item.elevatorId === elevatorId)
+        while (index !== -1) {
+          list.splice(index, 1)
+          index = list.findIndex((item) => item.elevatorId === elevatorId)
+        }
+
+        return [...list]
+      })
       if (mainView.callerStatus === CallerStatus.inside) {
-        isRunScrollAnimationFrame = true
         moveScroll(
           elevators.find((e) => e.queue.some((c) => c.flag === mainView.flag))!
             .direction
@@ -95,10 +115,8 @@ const App: Component = () => {
       }
     },
     onRunning(elevator) {
-      isRunScrollAnimationFrame = false
-      cancelAnimationFrame(ttt)
-      console.log(buildingElm!.scrollTop - scrollTop)
       setMainView("currentLevel", elevator.currentLevel)
+      cancelAnimationFrame(requestAnimationFrameId)
     },
   })
 
@@ -131,7 +149,7 @@ const App: Component = () => {
         item.scheduling = new Scheduling(item)
       })
 
-      // randomCalling()
+      randomCalling()
     })
   })
 
@@ -170,25 +188,16 @@ const App: Component = () => {
     }
   }
 
-  let isRunScrollAnimationFrame = false
-  let ttt = 0
-  let scrollTop = buildingElm?.scrollTop || 0
+  let requestAnimationFrameId = 0
+  let originScrollTop = buildingElm?.scrollTop || 0
   function moveScroll(direction: Direction) {
     if (!buildingElm) {
       return
     }
-    if (
-      (direction === Direction.up && buildingElm.scrollTop - 300 <= 0) ||
-      (direction === Direction.down &&
-        buildingElm.scrollTop + 300 >= buildingElm.scrollHeight)
-    ) {
-      return
-    }
 
-    // TODO: 运行卡顿
+    originScrollTop = buildingElm.scrollTop
     let start: number | null = null
     let timeGap: number | null = null
-    scrollTop = buildingElm.scrollTop
     function step(timestamp: number) {
       // timestamp回调函数传入的`DOMHighResTimeStamp`参数，也就是存储毫秒级的时间值
       if (start === null || timeGap === null) {
@@ -197,28 +206,54 @@ const App: Component = () => {
       }
       const elapsed = timestamp - start
       timeGap = timestamp - timeGap <= 0 ? 0 : timestamp - timeGap
-      const gap =
-        ((300 - scrollTop + buildingElm!.scrollTop) /
-          (ELEVATOR_THROUGH_FLOOR_TIME - elapsed)) *
-        timeGap
+
+      const scrollTop = buildingElm!.scrollTop
+      let gap = 0
+
       if (direction === Direction.up) {
+        gap =
+          Math.round(
+            ((FLOOR_HEIGHT - originScrollTop + scrollTop) /
+              (ELEVATOR_THROUGH_FLOOR_TIME - elapsed)) *
+              timeGap *
+              10
+          ) / 10
+
+        if (scrollTop - gap <= 0) {
+          buildingElm!.scrollTop = 0
+          return
+        }
+        if (scrollTop - gap <= originScrollTop - FLOOR_HEIGHT) {
+          buildingElm!.scrollTop = originScrollTop - FLOOR_HEIGHT
+          return
+        }
         buildingElm!.scrollTop = buildingElm!.scrollTop - gap
       } else {
+        gap =
+          Math.round(
+            ((FLOOR_HEIGHT - scrollTop + originScrollTop) /
+              (ELEVATOR_THROUGH_FLOOR_TIME - elapsed)) *
+              timeGap *
+              10
+          ) / 10
+
+        if (scrollTop + gap >= buildingElm!.scrollHeight) {
+          buildingElm!.scrollTop = buildingElm!.scrollHeight
+          return
+        }
+        if (scrollTop + gap >= originScrollTop + FLOOR_HEIGHT) {
+          buildingElm!.scrollTop = originScrollTop + FLOOR_HEIGHT
+          return
+        }
         buildingElm!.scrollTop = buildingElm!.scrollTop + gap
       }
 
       timeGap = timestamp
 
-      ttt = requestAnimationFrame(step)
-
-      // if (direction === Direction.up) {
-      //   buildingElm!.scrollTop = scrollTop - 300
-      // } else {
-      //   buildingElm!.scrollTop = scrollTop + 300
-      // }
+      requestAnimationFrameId = requestAnimationFrame(step)
     }
 
-    ttt = requestAnimationFrame(step)
+    requestAnimationFrameId = requestAnimationFrame(step)
   }
 
   /**
@@ -832,195 +867,226 @@ const App: Component = () => {
   }
 
   return (
-    <div class="w-full h-full flex justify-center items-center py-20px">
-      <div class="flex items-center h-full">
-        <div
-          class="border-y-1px border-[#c0c0c0] h-full overflow-y-hidden"
-          ref={(el) => (buildingElm = el)}
-        >
-          <Index each={building}>
-            {(item, index) => {
-              const floor = item()
-              return (
-                <div
-                  class="flex h-300px items-center border-[#c0c0c0]"
-                  classList={{
-                    "border-b-1px": index + 1 !== building.length,
-                  }}
-                >
-                  <div class="w-100px">
-                    <div class="mb-6px">{floor.level}楼</div>
-                    <div>等待人数：{item().queue.length}</div>
-                  </div>
-
-                  <Index each={item().elevators}>
-                    {(buildingElevator) => {
-                      const { id } = buildingElevator()
-                      const elevator = createMemo(
-                        () => elevators.find((e) => e.id === id)!
-                      )
-                      const isOpenDoor = createMemo(() =>
-                        Boolean(
-                          item().level === mainView.currentLevel &&
-                            ((mainView.callerStatus === CallerStatus.outside &&
-                              elevator().currentLevel ===
-                                mainView.currentLevel) ||
-                              (mainView.callerStatus === CallerStatus.inside &&
-                                elevator().queue.some(
-                                  (item) => item.flag === mainView.flag
-                                )))
-                        )
-                      )
-
-                      return (
-                        <div class="w-220px px-20px flex flex-col items-center justify-center">
-                          <div class="border border-[#b0b7c5] h-40px w-full flex justify-around items-center">
-                            <Index each={LIGHT_COLOR}>
-                              {(color) => {
-                                const c = color()
-                                const show = createMemo(() => {
-                                  let show = true
-                                  const { currentLevel, elevatorStatus } =
-                                    elevator()
-
-                                  switch (c) {
-                                    case LightColor.red:
-                                      // 电梯不在此楼层的展示红灯
-                                      show = currentLevel !== floor.level
-                                      break
-                                    case LightColor.yellow:
-                                      // 电梯在此楼层并且为等待状态展示黄灯
-                                      show =
-                                        currentLevel === floor.level &&
-                                        (elevatorStatus ===
-                                          ElevatorStatus.running ||
-                                          elevatorStatus ===
-                                            ElevatorStatus.pending)
-                                      break
-                                    case LightColor.green:
-                                      show =
-                                        currentLevel === floor.level &&
-                                        elevatorStatus === ElevatorStatus.open
-                                      break
-
-                                    default:
-                                      break
-                                  }
-                                  return show
-                                })
-
-                                return (
-                                  <div
-                                    class="w-30px h-30px rounded-full"
-                                    classList={{ "opacity-10": !show() }}
-                                    style={{ background: c }}
-                                  />
-                                )
-                              }}
-                            </Index>
-                          </div>
-
-                          <div class="w-full my-4px flex justify-around">
-                            <div>
-                              <LedNumber
-                                number={transformFloorNumber(
-                                  elevator().currentLevel,
-                                  2
-                                )}
-                              />
-                              <LedNumber
-                                number={transformFloorNumber(
-                                  elevator().currentLevel,
-                                  1
-                                )}
-                              />
-                            </div>
-                            <div class="w-24px h-24px border text-center">
-                              {elevator().direction === Direction.up
-                                ? "up"
-                                : elevator().direction === Direction.down
-                                ? "down"
-                                : "stop"}
-                            </div>
-                            <div class="w-24px h-24px border text-center">
-                              {`${elevator().queue.length}`}
-                            </div>
-                          </div>
-
-                          <div class="border border-[#b0b7c5] w-full h-190px flex justify-center relative">
-                            {isOpenDoor() && (
-                              <GetInAndOutButton
-                                callerStatus={mainView.callerStatus}
-                                isClose={buildingElevator().translateX[0] === 0}
-                                emitGetInElevator={() =>
-                                  mainView.callerStatus === CallerStatus.inside
-                                    ? getOutElevator(elevator().id)
-                                    : getInElevator(elevator().id)
-                                }
-                              />
-                            )}
-                            <Index each={buildingElevator().translateX}>
-                              {(translateX) => {
-                                return (
-                                  <div
-                                    class="w-1px h-full bg-#b0b7c5 transition-transform ease"
-                                    style={{
-                                      "transition-duration": `${DOOR_ACTION_TIME}ms`,
-                                      transform: `translateX(${translateX()}px)`,
-                                    }}
-                                  />
-                                )
-                              }}
-                            </Index>
-                          </div>
-                        </div>
-                      )
+    <>
+      <Message
+        msg="It's already full!!!"
+        visible={messageVisible()}
+        onClose={() => setMessageVisible(false)}
+      />
+      <div class="w-full h-full flex justify-center items-center py-20px">
+        <div class="flex items-center h-full">
+          <div
+            class="border-y-1px border-[#c0c0c0] h-full overflow-y-hidden"
+            ref={(el) => (buildingElm = el)}
+          >
+            <Index each={building}>
+              {(item, index) => {
+                const floor = item()
+                return (
+                  <div
+                    class="flex items-center border-[#c0c0c0]"
+                    classList={{
+                      "border-b-1px": index + 1 !== building.length,
                     }}
-                  </Index>
-                </div>
-              )
-            }}
-          </Index>
-        </div>
+                    style={{ height: `${FLOOR_HEIGHT}px` }}
+                  >
+                    <div class="w-140px">
+                      <div class="my-6px text-18px font-bold">
+                        {floor.level}
+                      </div>
+                      <div>Waiting Num: {item().queue.length}</div>
+                    </div>
 
-        <div class="ml-42px">
-          <h2>操作面板</h2>
-          <div>
-            <div>Your Level: {mainView.currentLevel}</div>
-            {mainView.callerStatus === CallerStatus.outside ? (
-              <div>
-                <button onClick={() => personCalling(Direction.up)}>up</button>
-                <button onClick={() => personCalling(Direction.down)}>
-                  down
-                </button>
-              </div>
-            ) : (
-              <>
-                <ul class="w-200px flex flex-wrap">
-                  <Index each={handelTargetLevelBtn()}>
-                    {(item) => (
-                      <li
-                        class="m-3px"
-                        classList={{
-                          "bg-#333": item().isTargetLevel,
-                        }}
-                        onClick={() => handelTargetLevel(item().level)}
-                      >
-                        {item().level}
-                      </li>
-                    )}
-                  </Index>
-                </ul>
-                <div>
-                  <button onClick={() => personHandleDoor("open")}>开</button>
-                  <button onClick={() => personHandleDoor("close")}>关</button>
+                    <Index each={item().elevators}>
+                      {(buildingElevator) => {
+                        const { id } = buildingElevator()
+                        const elevator = createMemo(
+                          () => elevators.find((e) => e.id === id)!
+                        )
+                        const isOpenDoor = createMemo(() =>
+                          Boolean(
+                            item().level === mainView.currentLevel &&
+                              ((mainView.callerStatus ===
+                                CallerStatus.outside &&
+                                elevator().currentLevel ===
+                                  mainView.currentLevel) ||
+                                (mainView.callerStatus ===
+                                  CallerStatus.inside &&
+                                  elevator().queue.some(
+                                    (item) => item.flag === mainView.flag
+                                  )))
+                          )
+                        )
+
+                        return (
+                          <div class="w-220px px-20px flex flex-col items-center justify-center">
+                            <div class="border border-[#b0b7c5] h-40px w-full flex justify-around items-center">
+                              <Index each={LIGHT_COLOR}>
+                                {(color) => {
+                                  const c = color()
+                                  const show = createMemo(() => {
+                                    let show = true
+                                    const { currentLevel, elevatorStatus } =
+                                      elevator()
+
+                                    switch (c) {
+                                      case LightColor.red:
+                                        // 电梯不在此楼层的展示红灯
+                                        show = currentLevel !== floor.level
+                                        break
+                                      case LightColor.yellow:
+                                        // 电梯在此楼层并且为等待状态展示黄灯
+                                        show =
+                                          currentLevel === floor.level &&
+                                          (elevatorStatus ===
+                                            ElevatorStatus.running ||
+                                            elevatorStatus ===
+                                              ElevatorStatus.pending)
+                                        break
+                                      case LightColor.green:
+                                        show =
+                                          currentLevel === floor.level &&
+                                          elevatorStatus === ElevatorStatus.open
+                                        break
+
+                                      default:
+                                        break
+                                    }
+                                    return show
+                                  })
+
+                                  return (
+                                    <div
+                                      class="w-30px h-30px rounded-full"
+                                      classList={{ "opacity-10": !show() }}
+                                      style={{ background: c }}
+                                    />
+                                  )
+                                }}
+                              </Index>
+                            </div>
+
+                            <div class="w-full my-4px flex justify-around">
+                              <div>
+                                <LedNumber
+                                  number={transformFloorNumber(
+                                    elevator().currentLevel,
+                                    2
+                                  )}
+                                />
+                                <LedNumber
+                                  number={transformFloorNumber(
+                                    elevator().currentLevel,
+                                    1
+                                  )}
+                                />
+                              </div>
+                              <div class="w-24px h-24px border text-center">
+                                {elevator().direction === Direction.up
+                                  ? "up"
+                                  : elevator().direction === Direction.down
+                                  ? "down"
+                                  : "stop"}
+                              </div>
+                              <div class="w-24px h-24px border text-center">
+                                {`${elevator().queue.length}`}
+                              </div>
+                            </div>
+
+                            <div class="border border-[#b0b7c5] w-full h-190px flex justify-center relative">
+                              {isOpenDoor() && (
+                                <GetInAndOutButton
+                                  callerStatus={mainView.callerStatus}
+                                  isClose={
+                                    buildingElevator().translateX[0] === 0
+                                  }
+                                  emitGetInElevator={() =>
+                                    mainView.callerStatus ===
+                                    CallerStatus.inside
+                                      ? getOutElevator(elevator().id)
+                                      : getInElevator(elevator().id)
+                                  }
+                                />
+                              )}
+                              <Index each={buildingElevator().translateX}>
+                                {(translateX) => {
+                                  return (
+                                    <div
+                                      class="w-1px h-full bg-#b0b7c5 transition-transform ease"
+                                      style={{
+                                        "transition-duration": `${DOOR_ACTION_TIME}ms`,
+                                        transform: `translateX(${translateX()}px)`,
+                                      }}
+                                    />
+                                  )
+                                }}
+                              </Index>
+                            </div>
+                          </div>
+                        )
+                      }}
+                    </Index>
+                  </div>
+                )
+              }}
+            </Index>
+          </div>
+
+          <div class="ml-42px">
+            <h2 class="my-12px">Operation Panel</h2>
+            <div>
+              <div class="mb-12px">Your Level: {mainView.currentLevel}</div>
+              {mainView.callerStatus === CallerStatus.outside ? (
+                <div class="flex">
+                  <IconSvg
+                    name="up"
+                    isUse={building
+                      .find((item) => item.level === mainView.currentLevel)!
+                      .direction.includes(Direction.up)}
+                    onClick={() => personCalling(Direction.up)}
+                  />
+
+                  <IconSvg
+                    name="down"
+                    isUse={building
+                      .find((item) => item.level === mainView.currentLevel)!
+                      .direction.includes(Direction.down)}
+                    onClick={() => personCalling(Direction.down)}
+                  />
                 </div>
-              </>
-            )}
+              ) : (
+                <>
+                  <ul class="w-120px flex flex-wrap">
+                    <Index each={handelTargetLevelBtn()}>
+                      {(item) => (
+                        <li
+                          class="m-3px border h-24px w-24px text-center leading-22px"
+                          style={{
+                            color: item().isTargetLevel ? USE_COLOR : "#000",
+                            "border-color": item().isTargetLevel
+                              ? USE_COLOR
+                              : "#000",
+                          }}
+                          onClick={() => handelTargetLevel(item().level)}
+                        >
+                          {item().level}
+                        </li>
+                      )}
+                    </Index>
+                  </ul>
+                  <div>
+                    <button onClick={() => personHandleDoor("open")}>open door</button>
+                    <button onClick={() => personHandleDoor("close")}>
+                      close door
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 

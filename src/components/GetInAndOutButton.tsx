@@ -33,7 +33,7 @@ const GetInButton: Component<{
         class="box-border p-4px text-center border"
         onClick={() => props.emitGetInElevator()}
       >
-        {props.callerStatus === CallerStatus.inside ? "出门" : "进入"}
+        {props.callerStatus === CallerStatus.inside ? "out" : "enter"}
       </div>
     </div>
   )

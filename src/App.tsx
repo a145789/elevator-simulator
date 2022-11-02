@@ -1075,7 +1075,9 @@ const App: Component = () => {
                     </Index>
                   </ul>
                   <div>
-                    <button onClick={() => personHandleDoor("open")}>open door</button>
+                    <button onClick={() => personHandleDoor("open")}>
+                      open door
+                    </button>
                     <button onClick={() => personHandleDoor("close")}>
                       close door
                     </button>

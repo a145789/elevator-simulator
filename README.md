@@ -1,4 +1,4 @@
-# 电梯模拟器
+# Elevator Simulator(电梯模拟器)
 
-使用 `solid-js` 开发，模拟电梯运行，上楼下楼。
+Using 'solid-js' development, simulation of real elevator operation, upstairs and downstairs.
  
